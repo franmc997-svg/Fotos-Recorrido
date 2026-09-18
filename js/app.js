@@ -19,6 +19,7 @@
     library: null,       // { id, records, home, scannedAt }
     fileRefs: new Map(), // índice del escaneo -> File, solo durante la sesión
     trips: [],
+    groups: [],
     scan: null
   };
 
@@ -36,6 +37,7 @@
       aspect: '9:16',
       pinStyle: 'teardrop',
       pinSize: 1,
+      groupRadiusM: 350,
       showTrack: true,
       showRoute: true,
       routeDashed: true,
@@ -166,6 +168,7 @@
       state.mapDoc.settings.bearing = state.map.getBearing();
       saveMapSoon();
       updateOverlay();
+      renderOverlapHint();
     });
 
     state.map.on('click', (e) => {
@@ -478,13 +481,25 @@
   }
 
   const SUGGESTED_PINS = 12;
+  const TRACK_MAX_POINTS = 4000;
+
+  /* Registro mínimo de cada foto del viaje: es lo que permite reagrupar y
+     elegir pines a mano más tarde sin depender de que la biblioteca siga
+     escaneada. 669 fotos ocupan unos 70 KB. */
+  function tripPhotoRecord(r) {
+    return { idx: r.idx, name: r.name, kind: r.kind, lat: r.lat, lng: r.lng, takenAt: r.takenAt };
+  }
 
   async function createMapFromTrip(trip) {
     busy(true, 'Creando el mapa del viaje…');
     try {
       const id = 'm_' + Date.now().toString(36);
       const located = trip.photos.filter((p) => p.lat != null);
-      const track = Trips.simplify(located.map((p) => [p.lng, p.lat]));
+      // La traza se guarda completa salvo que sea enorme: simplificarla
+      // siempre tiraba dos tercios de los puntos y la ruta se veía peor de lo
+      // que realmente fue.
+      const pts = located.map((p) => [p.lng, p.lat]);
+      const track = pts.length > TRACK_MAX_POINTS ? Trips.simplify(pts) : pts;
       const settings = defaultSettings();
       settings.title = Trips.label(trip);
       if (trip.centroid) {
@@ -493,11 +508,13 @@
       }
       const doc = {
         id, name: Trips.label(trip), settings, track,
+        tripPhotos: trip.photos.map(tripPhotoRecord),
         tripId: trip.id, createdAt: Date.now()
       };
       await DB.putMap(doc);
 
-      const pins = Trips.suggestPins(trip.photos, SUGGESTED_PINS);
+      const groups = Trips.stops(trip.photos, { radiusKm: settings.groupRadiusM / 1000 });
+      const pins = Trips.rankGroups(groups, SUGGESTED_PINS).map((g) => g.rep);
       for (let i = 0; i < pins.length; i++) {
         const rec = Photos.fromScan(pins[i], id);
         rec.order = i;
@@ -516,6 +533,261 @@
     } finally {
       busy(false);
     }
+  }
+
+  /* ---------------- paradas del viaje ---------------- */
+
+  const MAX_GROUP_ROWS = 400;
+
+  /* La distancia de agrupación va de 50 m a 20 km porque ambos extremos hacen
+     falta de verdad: dentro de una ciudad se distinguen esquinas, y un viaje
+     Madrid-Toledo-Segovia necesita decenas de km para tener un pin por
+     ciudad en vez de tres montones de pines superpuestos. Un deslizador
+     lineal haría imposible acertar los valores pequeños, así que va por
+     pasos. */
+  const GROUP_RADII = [50, 100, 150, 200, 300, 350, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 12000, 20000];
+
+  function radiusIndex(m) {
+    let best = 0, bestD = Infinity;
+    GROUP_RADII.forEach((v, i) => { const d = Math.abs(v - m); if (d < bestD) { bestD = d; best = i; } });
+    return best;
+  }
+
+  function tripPhotos() {
+    return (state.mapDoc && state.mapDoc.tripPhotos) || [];
+  }
+
+  /* Un grupo "tiene pin" si alguna de sus fotos ya es un pin del mapa. Se
+     compara por la clave del escaneo y también por nombre, porque los mapas
+     creados antes de que las claves fueran estables guardan otra cosa. */
+  function pinnedKeySet() {
+    const set = new Set();
+    for (const p of state.photos) {
+      if (p.scanIdx != null) set.add('k:' + p.scanIdx);
+      if (p.name) set.add('n:' + p.name);
+    }
+    return set;
+  }
+
+  function groupPins(group, pinned) {
+    return group.photos.filter((r) =>
+      (r.idx != null && pinned.has('k:' + r.idx)) || (r.name && pinned.has('n:' + r.name)));
+  }
+
+  function computeGroups() {
+    const photos = tripPhotos();
+    if (!photos.length) return [];
+    const radiusKm = (state.mapDoc.settings.groupRadiusM || 350) / 1000;
+    return Trips.stops(photos, { radiusKm });
+  }
+
+  function fmtDist(m) {
+    return m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' km' : Math.round(m) + ' m';
+  }
+
+  function fmtClock(ts) {
+    return new Date(ts).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  /* Cuántos pines se dibujan pisándose a este zoom. En un viaje entre
+     ciudades, doce pines a 134 km de distancia se apilan en tres montones
+     ilegibles y el póster sale mal sin que nada avise. */
+  function overlappingPins() {
+    if (!state.map || !state.mapDoc) return 0;
+    const list = ordered();
+    if (list.length < 2) return 0;
+    const s = state.mapDoc.settings;
+    const w = MapView.PIN.baseWidth * MapView.pinScale($('stage').clientWidth, s.pinSize);
+    const pts = list.map((p) => state.map.project([p.lng, p.lat]));
+    let n = 0;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = 0; j < pts.length; j++) {
+        if (i === j) continue;
+        if (Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y) < w * 0.9) { n++; break; }
+      }
+    }
+    return n;
+  }
+
+  function renderOverlapHint() {
+    const el = $('groupOverlap');
+    if (!el) return;
+    const n = overlappingPins();
+    el.hidden = n < 2;
+    if (n >= 2) {
+      el.textContent = `${n} pines se están dibujando encima de otros a este zoom. `
+        + 'Sube la distancia de agrupación para tener menos pines, o acércate para separarlos.';
+    }
+  }
+
+  function renderGroups() {
+    const section = $('groupSection');
+    const photos = tripPhotos();
+    if (!photos.length) {
+      section.hidden = true;
+      // Solo tiene sentido ofrecer la reconstrucción si hay biblioteca y el
+      // mapa tiene pines con fecha con los que emparejar un viaje.
+      $('groupRebuild').hidden = !(state.library && state.library.records.length
+        && state.photos.some((p) => p.takenAt));
+      return;
+    }
+    $('groupRebuild').hidden = true;
+    section.hidden = false;
+
+    state.groups = computeGroups();
+    const pinned = pinnedKeySet();
+    const onlyPinned = $('groupOnlyPinned').checked;
+
+    $('groupCount').textContent = state.groups.length;
+    const located = photos.filter((r) => r.lat != null).length;
+    $('groupPhotoCount').textContent = `${fmtInt(located)} fotos con GPS`;
+
+    const ul = $('groupList');
+    ul.innerHTML = '';
+
+    let shown = 0, prev = null;
+    for (const g of state.groups) {
+      const pins = groupPins(g, pinned);
+      const dist = prev ? Trips.haversine(prev.lat, prev.lng, g.lat, g.lng) * 1000 : 0;
+      prev = g;
+      if (onlyPinned && !pins.length) continue;
+      if (shown >= MAX_GROUP_ROWS) continue;
+      shown++;
+
+      const li = document.createElement('li');
+      li.className = 'group-row' + (pins.length ? ' is-pinned' : '');
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = pins.length > 0;
+      cb.title = pins.length ? 'Quitar el pin de esta parada' : 'Poner un pin en esta parada';
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', () => toggleGroupPin(g, cb.checked));
+
+      const meta = document.createElement('div');
+      meta.className = 'group-meta';
+      const bits = [`${fmtInt(g.count)} foto${g.count === 1 ? '' : 's'}`];
+      if (g.minutes >= 5) bits.push(`${g.minutes >= 90 ? (g.minutes / 60).toFixed(1) + ' h' : g.minutes + ' min'}`);
+      if (dist) bits.push(`a ${fmtDist(dist)} de la anterior`);
+      // Al subir la distancia de agrupación varios pines acaban dentro de la
+      // misma parada; sin decirlo, desmarcar una parecería borrar de más.
+      if (pins.length > 1) bits.push(`${pins.length} pines aquí`);
+      meta.innerHTML = `<div class="group-title">${escapeHtml(fmtClock(g.start))}</div>
+        <div class="group-sub">${escapeHtml(bits.join(' · '))}</div>`;
+
+      li.appendChild(cb);
+      li.appendChild(meta);
+      li.addEventListener('click', () => {
+        if (state.map) state.map.easeTo({ center: [g.lng, g.lat], zoom: Math.max(state.map.getZoom(), 14) });
+      });
+      ul.appendChild(li);
+    }
+
+    renderOverlapHint();
+
+    if (!shown) {
+      const li = document.createElement('li');
+      li.className = 'empty tiny muted';
+      li.textContent = onlyPinned ? 'Ninguna parada tiene pin.' : 'Ninguna parada con estos ajustes.';
+      ul.appendChild(li);
+    } else if (state.groups.length > MAX_GROUP_ROWS && !onlyPinned) {
+      const li = document.createElement('li');
+      li.className = 'empty tiny muted';
+      li.textContent = `Se muestran las primeras ${MAX_GROUP_ROWS} de ${fmtInt(state.groups.length)}. `
+        + 'Sube la distancia de agrupación para tener menos paradas y más grandes.';
+      ul.appendChild(li);
+    }
+  }
+
+  /* Recupera la lista de fotos del viaje para un mapa antiguo: busca en la
+     biblioteca el viaje cuyas fechas más se solapan con las de sus pines. */
+  async function rebuildTripPhotos() {
+    const times = state.photos.filter((p) => p.takenAt).map((p) => p.takenAt);
+    if (!times.length || !state.library) {
+      banner('Necesito la biblioteca escaneada y pines con fecha para reconstruir las paradas.', 'warn');
+      return;
+    }
+    busy(true, 'Buscando el viaje en la biblioteca…');
+    try {
+      const lo = Math.min(...times), hi = Math.max(...times);
+      let best = null, bestOverlap = 0;
+      for (const t of Trips.detect(state.library.records, tripOptions())) {
+        const ov = Math.min(hi, t.end) - Math.max(lo, t.start);
+        if (ov > bestOverlap) { bestOverlap = ov; best = t; }
+      }
+      if (!best) {
+        banner('Ningún viaje de la biblioteca coincide con las fechas de este mapa. Vuelve a escanear las fotos de ese viaje.', 'warn', true);
+        return;
+      }
+      state.mapDoc.tripPhotos = best.photos.map(tripPhotoRecord);
+      const pts = best.photos.filter((r) => r.lat != null).map((r) => [r.lng, r.lat]);
+      state.mapDoc.track = pts.length > TRACK_MAX_POINTS ? Trips.simplify(pts) : pts;
+      await DB.putMap(state.mapDoc);
+      syncTrack();
+      banner(`Paradas reconstruidas desde ${fmtInt(best.photos.length)} fotos del viaje.`, 'ok');
+    } finally {
+      busy(false);
+    }
+    renderGroups();
+  }
+
+  async function toggleGroupPin(group, on) {
+    const pinned = pinnedKeySet();
+    if (on) {
+      const rec = Photos.fromScan(group.rep, state.mapDoc.id);
+      rec.order = state.photos.length;
+      state.photos.push(rec);
+      await savePhoto(rec);
+    } else {
+      for (const r of groupPins(group, pinned)) {
+        const hit = state.photos.find((p) =>
+          (r.idx != null && p.scanIdx === r.idx) || (r.name && p.name === r.name));
+        if (hit) await deletePhotoById(hit.id);
+      }
+    }
+    renderLists();
+    syncMarkers();
+    syncRoute();
+    renderGroups();
+  }
+
+  async function pinTopGroups(n) {
+    if (!state.groups.length) return;
+    if (state.photos.length && !confirm(
+      `Esto sustituye los ${state.photos.length} pines actuales por las ${n} paradas con más peso. ¿Seguir?`)) return;
+    busy(true, 'Marcando paradas…');
+    try {
+      for (const p of state.photos.slice()) await deletePhotoById(p.id);
+      const top = Trips.rankGroups(state.groups, n);
+      for (let i = 0; i < top.length; i++) {
+        const rec = Photos.fromScan(top[i].rep, state.mapDoc.id);
+        rec.order = i;
+        state.photos.push(rec);
+        await savePhoto(rec);
+      }
+      banner(`${top.length} paradas marcadas como pin de ${fmtInt(state.groups.length)}.`, 'ok');
+    } finally {
+      busy(false);
+    }
+    renderLists();
+    syncMarkers();
+    syncRoute();
+    renderGroups();
+  }
+
+  async function unpinAll() {
+    if (!state.photos.length) return;
+    if (!confirm(`¿Quitar los ${state.photos.length} pines del mapa? La traza del recorrido no se toca.`)) return;
+    busy(true, 'Quitando pines…');
+    try {
+      for (const p of state.photos.slice()) await deletePhotoById(p.id);
+    } finally {
+      busy(false);
+    }
+    renderLists();
+    syncMarkers();
+    syncRoute();
+    renderGroups();
   }
 
   /* ---------------- píxeles bajo demanda ---------------- */
@@ -806,19 +1078,26 @@
     return d.toISOString().slice(0, 16);
   }
 
-  async function removePhoto(id) {
-    const p = state.photos.find((x) => x.id === id);
-    if (!p) return;
-    if (!confirm(`¿Eliminar «${p.caption || p.name}» de este mapa?`)) return;
+  /* Borra sin preguntar ni repintar: lo usan tanto el botón de eliminar como
+     las acciones en bloque de las paradas, que repintan una sola vez al final. */
+  async function deletePhotoById(id) {
     await DB.deletePhoto(id);
     state.photos = state.photos.filter((x) => x.id !== id);
     if (state.thumbUrls.has(id)) { URL.revokeObjectURL(state.thumbUrls.get(id)); state.thumbUrls.delete(id); }
     if (state.displayUrls.has(id)) { URL.revokeObjectURL(state.displayUrls.get(id)); state.displayUrls.delete(id); }
     state.thumbImgs.delete(id);
     if (state.selectedId === id) clearSelection();
+  }
+
+  async function removePhoto(id) {
+    const p = state.photos.find((x) => x.id === id);
+    if (!p) return;
+    if (!confirm(`¿Eliminar «${p.caption || p.name}» de este mapa?`)) return;
+    await deletePhotoById(id);
     renderLists();
     syncMarkers();
     syncRoute();
+    renderGroups();
   }
 
   /* ---------------- ingesta ---------------- */
@@ -877,6 +1156,7 @@
     renderLists();
     syncMarkers();
     syncRoute();
+    renderGroups();
     if (withGps) fitAll();
 
     const parts = [`${state.photos.length} fotos en el mapa`, `${withGps} con GPS`];
@@ -932,6 +1212,7 @@
     applyAspect();
     updateOverlay();
     renderLists();
+    renderGroups();
 
     if (!state.map) {
       initMap();
@@ -961,6 +1242,8 @@
     $('inFooter').checked = !!s.showFooter;
     $('inLegend').checked = !!s.showLegend;
     $('orderMode').value = s.orderMode;
+    $('groupRadius').value = radiusIndex(s.groupRadiusM || 350);
+    $('groupRadiusVal').textContent = fmtDist(s.groupRadiusM || 350);
     document.querySelectorAll('#themeGrid .swatch').forEach((b) => {
       b.classList.toggle('is-active', b.dataset.theme === s.theme);
     });
@@ -1048,6 +1331,7 @@
         name: state.mapDoc.name,
         settings: state.mapDoc.settings,
         track: state.mapDoc.track || [],
+        tripPhotos: state.mapDoc.tripPhotos || [],
         photos
       };
       const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
@@ -1068,6 +1352,7 @@
         name: (doc.name || 'Importado') + ' (importado)',
         settings: Object.assign(defaultSettings(), doc.settings || {}),
         track: doc.track || [],
+        tripPhotos: doc.tripPhotos || [],
         createdAt: Date.now()
       };
       await DB.putMap(mapDoc);
@@ -1193,6 +1478,20 @@
     });
     $('tripMinHours').addEventListener('change', renderTrips);
     $('btnLoadThumbs').addEventListener('click', () => loadPixels(placed()));
+
+    // paradas
+    $('groupRadius').addEventListener('input', (e) => {
+      $('groupRadiusVal').textContent = fmtDist(GROUP_RADII[Number(e.target.value)]);
+    });
+    $('groupRadius').addEventListener('change', (e) => {
+      state.mapDoc.settings.groupRadiusM = GROUP_RADII[Number(e.target.value)];
+      saveMapSoon();
+      renderGroups();
+    });
+    $('groupOnlyPinned').addEventListener('change', renderGroups);
+    $('btnPinTop').addEventListener('click', () => pinTopGroups(SUGGESTED_PINS));
+    $('btnPinNone').addEventListener('click', unpinAll);
+    $('btnRebuildTrip').addEventListener('click', rebuildTripPhotos);
     $('heicMode').value = heicChoice() || '';
     $('heicMode').addEventListener('change', (e) => {
       if (e.target.value) localStorage.setItem('fr:heic', e.target.value);
@@ -1381,6 +1680,7 @@
           id, name: state.mapDoc.name + ' (copia)',
           settings: structuredClone(state.mapDoc.settings),
           track: structuredClone(state.mapDoc.track || []),
+          tripPhotos: structuredClone(state.mapDoc.tripPhotos || []),
           createdAt: Date.now()
         });
         for (const p of state.photos) {

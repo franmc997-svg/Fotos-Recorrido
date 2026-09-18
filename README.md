@@ -51,9 +51,11 @@ nombre o escribiendo las coordenadas.
    marca *No descartar las fotos de casa* si el corte no te convence.
 4. **Crear mapa** en el viaje que quieras: se dibuja la traza completa y se
    proponen doce pines repartidos por las paradas reales del viaje.
-5. Cambia los pines que quieras, y pulsa *Cargar imágenes de los pines* si
-   quieres verlas (solo entonces se decodifica nada).
-6. Ajusta encuadre, tema, formato y textos. **Descargar imagen** → PNG o JPG,
+5. En **Paradas**, ajusta la distancia de agrupación y marca a mano cuáles
+   quieres como pin.
+6. Pulsa *Cargar imágenes de los pines* si quieres verlas (solo entonces se
+   decodifica nada).
+7. Ajusta encuadre, tema, formato y textos. **Descargar imagen** → PNG o JPG,
    hasta 3×.
 
 ## Qué hace
@@ -62,9 +64,18 @@ nombre o escribiendo las coordenadas.
   cancelación, y detección automática de viajes.
 - **Traza completa del viaje** dibujada como capa GL (miles de puntos no pesan)
   bajo la ruta de los pines.
-- **Pines sugeridos**: la app agrupa las fotos en paradas reales (fotos
-  seguidas en el tiempo y juntas en el espacio) y propone la más representativa
-  de cada una, repartidas por el mapa.
+- **Paradas con distancia ajustable**: las fotos se agrupan en paradas (fotos
+  seguidas en el tiempo y juntas en el espacio). La distancia que decide qué
+  cuenta como «el mismo sitio» va de 50 m a 20 km y se ajusta desde la
+  interfaz, porque no hay un valor correcto: dentro de una ciudad 100 m
+  distingue esquinas, y un viaje entre ciudades necesita decenas de km para no
+  acabar con tres montones de pines superpuestos.
+- **Elegir los pines a mano**: cada parada tiene una casilla. No todas tienen
+  que ser pin; las que no lo son siguen contando para la traza del recorrido.
+  Botones para marcar las doce con más peso o quitarlas todas de golpe.
+- **Aviso de pines superpuestos**: si a ese zoom hay pines dibujándose unos
+  encima de otros, la app lo dice en vez de dejar que se descubra al descargar
+  la imagen.
 - **Varios mapas** en paralelo, con renombrar, duplicar y eliminar.
 - **Pines ligados a la foto**: cada pin es una foto concreta. Clic lo
   selecciona, doble clic abre la foto a pantalla completa, arrastrar lo mueve.
@@ -147,6 +158,13 @@ menos que se puede caer y nada que se cargue desde fuera al abrir la app.
   nuevas de fotos que no tenían hay que volver a escanear la carpeta.
 - **La detección de viajes necesita fechas.** Si tus fotos no tienen ni fecha
   EXIF ni fecha de archivo fiable, no hay forma de separar viajes.
+- **En iPhone hay que escanear por tandas.** El selector de fotos de iOS tarda
+  minutos en preparar cientos de imágenes antes de que la página vea ninguna, y
+  eso ocurre fuera del alcance de la app. Escanear varias veces suma: cada
+  tanda se añade a las anteriores.
+- **Los mapas creados antes de esta versión no guardan la lista de fotos del
+  viaje**, así que no se pueden reagrupar. Hay un botón para reconstruirla
+  desde la biblioteca si sigue escaneada.
 - **El almacenamiento es del navegador y de este dispositivo.** Borrar los
   datos del sitio borra los mapas. Exporta el proyecto si quieres conservarlo.
 - **La atribución de OpenStreetMap se dibuja siempre** en la imagen, incluso

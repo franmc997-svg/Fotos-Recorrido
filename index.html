@@ -97,6 +97,44 @@
 
       <div id="ingestProgress" class="progress" hidden><div class="bar"></div><span></span></div>
 
+      <!-- mapas creados antes de guardar las fotos del viaje -->
+      <div id="groupRebuild" class="section" hidden>
+        <p class="tiny muted">
+          Este mapa se creó sin guardar la lista de fotos del viaje, así que no
+          puedo agrupar sus paradas. Si la biblioteca sigue escaneada, puedo
+          reconstruirla a partir de las fechas de este mapa.
+        </p>
+        <div class="btn-row">
+          <button id="btnRebuildTrip" class="btn tiny primary">Reconstruir paradas</button>
+        </div>
+      </div>
+
+      <!-- paradas: agrupar las fotos del viaje y elegir a mano cuáles son pin -->
+      <div id="groupSection" class="section" hidden>
+        <div class="section-head">
+          <h3>Paradas <span id="groupCount" class="pill">0</span></h3>
+          <span id="groupPhotoCount" class="tiny muted"></span>
+        </div>
+        <div class="field row">
+          <label for="groupRadius">Agrupar fotos a menos de <b id="groupRadiusVal">350 m</b></label>
+          <input id="groupRadius" type="range" min="0" max="15" step="1" value="5">
+        </div>
+        <p class="tiny muted">
+          Cada parada es un grupo de fotos seguidas y cercanas. Marca cuáles
+          quieres como pin: las demás siguen contando para la traza del
+          recorrido, solo que sin pin.
+        </p>
+        <div class="btn-row">
+          <button id="btnPinTop" class="btn tiny ghost">Marcar las 12 mejores</button>
+          <button id="btnPinNone" class="btn tiny ghost">Quitar todos</button>
+          <label class="tiny muted" for="groupOnlyPinned" style="margin-left:auto">
+            <input type="checkbox" id="groupOnlyPinned"> Solo con pin
+          </label>
+        </div>
+        <p id="groupOverlap" class="tiny warn-text" hidden></p>
+        <ul id="groupList" class="grouplist"></ul>
+      </div>
+
       <div class="section">
         <div class="section-head">
           <h3>Sin ubicar <span id="unplacedCount" class="pill warn">0</span></h3>

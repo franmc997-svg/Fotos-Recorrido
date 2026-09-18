@@ -142,9 +142,14 @@
   }
 
   /* Paradas: fotos seguidas en el tiempo y juntas en el espacio. Es lo que
-     distingue "estuve aquí" de "pasé por aquí en el bus". */
+     distingue "estuve aquí" de "pasé por aquí en el bus".
+
+     radiusKm es la regla que decide qué cuenta como "el mismo sitio": con
+     100 m cada esquina es una parada distinta; con 1 km un barrio entero es
+     una sola. No hay un valor correcto, depende del viaje, así que se
+     controla desde la interfaz. */
   function stops(photos, opts) {
-    const o = Object.assign({ radiusKm: 0.35, gapMin: 100 }, opts);
+    const o = Object.assign({ radiusKm: 0.35, gapMin: 120 }, opts);
     const list = photos.filter((r) => r.lat != null && r.takenAt != null)
       .sort((a, b) => a.takenAt - b.takenAt);
     const out = [];
@@ -163,21 +168,37 @@
       cur.end = r.takenAt;
     }
     if (cur) out.push(cur);
-    return out.map((s) => Object.assign(s, {
-      count: s.photos.length,
-      minutes: Math.round((s.end - s.start) / 60000)
-    }));
+
+    return out.map((s, i) => {
+      const rep = representative(s);
+      return Object.assign(s, {
+        count: s.photos.length,
+        minutes: Math.round((s.end - s.start) / 60000),
+        rep,
+        id: (rep && rep.idx != null ? String(rep.idx) : 'g' + i)
+      });
+    });
   }
 
-  /* Elige hasta n fotos representativas: las paradas con más peso, separadas
-     entre sí, y devueltas en orden cronológico. Si no hay sitios distintos
-     suficientes devuelve menos pines en vez de apilar varios en el mismo
-     punto: doce pines sobre cuatro lugares son cuatro pines y ocho estorbos. */
-  function suggestPins(photos, n, opts) {
+  /* La foto de la parada más cercana a su centro: la que mejor la representa
+     si solo se puede poner un pin. */
+  function representative(stop) {
+    let best = stop.photos[0], bestD = Infinity;
+    for (const r of stop.photos) {
+      const d = haversine(stop.lat, stop.lng, r.lat, r.lng);
+      if (d < bestD) { bestD = d; best = r; }
+    }
+    return best;
+  }
+
+  /* Ordena las paradas por peso (fotos + tiempo) y devuelve las n mejores
+     que además estén separadas entre sí. Si no hay sitios distintos
+     suficientes devuelve menos en vez de apilar varias en el mismo punto:
+     doce pines sobre cuatro lugares son cuatro pines y ocho estorbos. */
+  function rankGroups(groups, n, opts) {
     const o = Object.assign({ minSepKm: 0.6, floorKm: 0.08 }, opts);
-    const all = stops(photos, o);
-    if (!all.length) return [];
-    const ranked = all.slice().sort((a, b) =>
+    if (!groups.length) return [];
+    const ranked = groups.slice().sort((a, b) =>
       (b.count + b.minutes / 30) - (a.count + a.minutes / 30));
 
     const picked = [];
@@ -192,16 +213,12 @@
         picked.push(s);
       }
     }
-    return picked
-      .sort((a, b) => a.start - b.start)
-      .map((s) => {
-        let best = s.photos[0], bestD = Infinity;
-        for (const r of s.photos) {
-          const d = haversine(s.lat, s.lng, r.lat, r.lng);
-          if (d < bestD) { bestD = d; best = r; }
-        }
-        return best;
-      });
+    return picked.sort((a, b) => a.start - b.start);
+  }
+
+  /* Atajo: hasta n fotos representativas directamente desde las fotos. */
+  function suggestPins(photos, n, opts) {
+    return rankGroups(stops(photos, opts), n, opts).map((g) => g.rep);
   }
 
   /* Douglas-Peucker sobre [lng,lat]: 3000 puntos de traza no aportan más que
@@ -239,5 +256,5 @@
     return (a === b ? a : `${a} – ${b}`) + ' ' + y;
   }
 
-  return { haversine, detectHome, detect, stops, suggestPins, simplify, label, DEFAULTS };
+  return { haversine, detectHome, detect, stops, representative, rankGroups, suggestPins, simplify, label, DEFAULTS };
 }));
