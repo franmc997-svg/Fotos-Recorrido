@@ -303,6 +303,7 @@
     state.fileRefs = refs;
     const located = records.filter((r) => r.lat != null).length;
     const heic = records.filter((r) => r.kind === 'heic').length;
+    const timedOut = records.filter((r) => r.timedOut).length;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
 
     state.library = {
@@ -325,19 +326,50 @@
       (state.library.home
         ? `<br>Residencia detectada (${state.library.home.days} días distintos): sus fotos no cuentan como viaje.`
         : '<br>No detecté una residencia: trato todas las fotos como viaje.') +
+      (timedOut
+        ? `<br><b>${fmtInt(timedOut)}</b> foto(s) tardaron demasiado en leerse (posiblemente aún en iCloud, no descargadas al dispositivo) y quedaron sin ubicación.`
+        : '') +
       (cancelled ? '<br><b>Escaneo cancelado.</b>' : '');
 
     renderTrips();
     if (!state.trips.length) {
-      banner('No salió ningún viaje. Prueba a subir el hueco entre viajes o a marcar «No descartar las fotos de casa».', 'warn');
+      const best = (state.trips.rejected || []).slice().sort((a, b) => b.photos - a.photos)[0];
+      banner(
+        best
+          ? `No salió ningún viaje: el mejor tramo tiene ${fmtInt(best.photos)} fotos y dura ${best.hours < 1 ? Math.round(best.hours * 60) + ' min' : best.hours.toFixed(1) + ' h'}. Baja la duración mínima en «Viajes».`
+          : 'No salió ningún viaje. Revisa el hueco entre viajes o la duración mínima en «Viajes».',
+        'warn'
+      );
     }
   }
 
   function tripOptions() {
     return {
       maxGapHours: Number($('tripGap').value) || 36,
+      minHours: Number($('tripMinHours').value) || 0,
       homeMinDays: $('tripIgnoreHome').checked ? 1e9 : Trips.DEFAULTS.homeMinDays
     };
+  }
+
+  /* Explica por qué no salió ningún viaje en vez de dejar un "0" mudo: sin
+     esto, un tramo real que solo pierde por 20 minutos o por 2 fotos es
+     indistinguible de no haber viajado nunca. */
+  function renderTripDiagnostic() {
+    const diag = $('tripDiag');
+    const rejected = state.trips.rejected || [];
+    if (!rejected.length) { diag.hidden = true; return; }
+
+    const best = rejected.slice().sort((a, b) => b.photos - a.photos)[0];
+    const bits = [];
+    if (!state.trips.home) {
+      bits.push('No hay suficientes fotos de fondo para saber dónde vives, así que cuento todo el tramo seguido como un solo candidato a viaje.');
+    }
+    const motivos = [];
+    if (best.tooFewPhotos) motivos.push(`solo tiene ${fmtInt(best.photos)} fotos (mínimo 6)`);
+    if (best.tooShort) motivos.push(`dura ${best.hours < 1 ? Math.round(best.hours * 60) + ' min' : best.hours.toFixed(1) + ' h'} (mínimo ${$('tripMinHours').value} h)`);
+    bits.push(`El tramo más grande que encontré tiene ${fmtInt(best.photos)} fotos y ${motivos.join(' y ')}. Baja la duración mínima o revisa el hueco entre viajes.`);
+    diag.hidden = false;
+    diag.textContent = bits.join(' ');
   }
 
   function renderTrips() {
@@ -345,6 +377,7 @@
     ul.innerHTML = '';
     if (!state.library) {
       $('tripCount').textContent = '0';
+      $('tripDiag').hidden = true;
       const li = document.createElement('li');
       li.className = 'empty tiny muted';
       li.textContent = 'Escanea tus fotos para ver los viajes.';
@@ -353,6 +386,7 @@
     }
     state.trips = Trips.detect(state.library.records, tripOptions());
     $('tripCount').textContent = state.trips.length;
+    renderTripDiagnostic();
 
     if (!state.trips.length) {
       const li = document.createElement('li');
@@ -1080,6 +1114,10 @@
       $('tripGapVal').textContent = e.target.value;
     });
     $('tripGap').addEventListener('change', renderTrips);
+    $('tripMinHours').addEventListener('input', (e) => {
+      $('tripMinHoursVal').textContent = e.target.value;
+    });
+    $('tripMinHours').addEventListener('change', renderTrips);
     $('btnLoadThumbs').addEventListener('click', () => loadPixels(placed()));
     $('heicMode').value = heicChoice() || '';
     $('heicMode').addEventListener('change', (e) => {

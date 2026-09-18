@@ -29,8 +29,8 @@
     homeMinDays: 12,     // días distintos para considerar que hay residencia
     awayKm: 80,          // a partir de aquí se considera que estás de viaje
     maxGapHours: 36,     // hueco que parte un viaje en dos
-    minPhotos: 8,
-    minHours: 4
+    minPhotos: 6,
+    minHours: 1  // una salida de una tarde ya cuenta como viaje
   };
 
   /* Celda con fotos en más días distintos: donde duermes, no donde más fotos
@@ -120,11 +120,25 @@
       trip.photos.sort((a, b) => a.takenAt - b.takenAt);
     }
 
-    return trips
-      .map((t) => finishTrip(t, home))
-      .filter((t) => t.photos.length >= o.minPhotos && (t.end - t.start) >= o.minHours * 3600000)
+    const candidates = trips.map((t) => finishTrip(t, home));
+    const passes = (t) => t.photos.length >= o.minPhotos && (t.end - t.start) >= o.minHours * 3600000;
+    const accepted = candidates.filter(passes)
       .map((t, i) => Object.assign(t, { id: 't' + i }))
       .sort((a, b) => b.start - a.start);
+
+    // Diagnóstico de los tramos que no pasaron el corte: sin esto, "cero
+    // viajes" es un callejón sin salida. Con esto se puede decir exactamente
+    // qué faltó (fotos o duración) en vez de pedir adivinar.
+    accepted.rejected = candidates.filter((t) => !passes(t)).map((t) => ({
+      photos: t.photos.length,
+      hours: (t.end - t.start) / 3600000,
+      start: t.start,
+      end: t.end,
+      tooFewPhotos: t.photos.length < o.minPhotos,
+      tooShort: (t.end - t.start) < o.minHours * 3600000
+    }));
+    accepted.home = home;
+    return accepted;
   }
 
   /* Paradas: fotos seguidas en el tiempo y juntas en el espacio. Es lo que

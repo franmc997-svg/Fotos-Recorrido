@@ -70,7 +70,12 @@
           <label for="tripGap">Separar viajes con más de <b id="tripGapVal">36</b> h sin fotos</label>
           <input id="tripGap" type="range" min="12" max="96" step="6" value="36">
         </div>
+        <div class="field row">
+          <label for="tripMinHours">Duración mínima: <b id="tripMinHoursVal">1</b> h</label>
+          <input id="tripMinHours" type="range" min="0" max="24" step="1" value="1">
+        </div>
         <ul id="tripList" class="triplist"></ul>
+        <p id="tripDiag" class="tiny muted" hidden></p>
       </div>
     </section>
 

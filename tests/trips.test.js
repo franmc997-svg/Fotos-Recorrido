@@ -98,4 +98,39 @@ comprobar('un carrete que es un solo viaje da un viaje',
   Trips.detect(recs.filter((r) => r.takenAt > T0 + 119 * D && r.takenAt < T0 + 129 * D)).length === 1);
 
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');
+
+/* --- Caso real reportado: biblioteca pequeña, sin residencia detectable,
+   un tramo que dura menos que el mínimo. Antes daba "0 viajes" sin explicar
+   por qué; ahora debe explicarlo, y bajar la duración mínima debe rescatarlo. */
+console.log('\nCaso: 47 fotos de una tarde, sin residencia detectable');
+const tardeCorta = [];
+{
+  const base = Date.UTC(2026, 5, 1, 14, 0); // 14:00
+  for (let i = 0; i < 47; i++) {
+    tardeCorta.push({
+      idx: i, name: `IMG_${i}.HEIC`, kind: 'heic',
+      lat: 9.94 + (rnd() - 0.5) * 0.01,
+      lng: -84.09 + (rnd() - 0.5) * 0.01,
+      takenAt: base + i * 45000 // 47 fotos en 34.5 minutos
+    });
+  }
+}
+
+const home47 = Trips.detectHome(tardeCorta);
+comprobar('con solo 47 fotos no se detecta residencia (esperado)', !home47);
+
+const conDefaults = Trips.detect(tardeCorta);
+comprobar('con la duración mínima por defecto (1h) el tramo de 34 min no entra',
+  conDefaults.length === 0);
+comprobar('pero el diagnóstico explica por qué (no queda mudo)',
+  Array.isArray(conDefaults.rejected) && conDefaults.rejected.length === 1
+  && conDefaults.rejected[0].tooShort === true
+  && conDefaults.rejected[0].photos === 47,
+  JSON.stringify(conDefaults.rejected));
+
+const conMinHoraCero = Trips.detect(tardeCorta, { minHours: 0 });
+comprobar('bajando la duración mínima a 0, esas 47 fotos sí forman un viaje',
+  conMinHoraCero.length === 1 && conMinHoraCero[0].photos.length === 47);
+
+console.log(fallos ? `\n${fallos} comprobaciones fallidas en total` : '\nTodo correcto (incluyendo el caso reportado)');
 process.exit(fallos ? 1 : 0);

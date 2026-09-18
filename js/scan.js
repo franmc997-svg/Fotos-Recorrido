@@ -28,6 +28,23 @@
 
   const PICK = ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'Make', 'Model', 'Orientation'];
 
+  // Fotos "optimizadas" en iCloud (no descargadas al dispositivo), un HEIC
+  // con una caja corrupta o cualquier archivo raro pueden dejar colgada la
+  // lectura de un único archivo para siempre. Sin límite de tiempo, esa
+  // foto se lleva el escaneo entero con ella: con 400 fotos basta una mala
+  // para que la barra de progreso no vuelva a moverse.
+  const FILE_TIMEOUT_MS = 20000;
+
+  function withTimeout(promise, ms) {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve({ __timedOut: true }), ms);
+      promise.then(
+        (v) => { clearTimeout(t); resolve(v); },
+        () => { clearTimeout(t); resolve({ __timedOut: true }); }
+      );
+    });
+  }
+
   async function readOne(file) {
     const kind = kindOf(file);
     const rec = {
@@ -83,10 +100,20 @@
         while (!cancelled) {
           const i = next++;
           if (i >= total) return;
-          const rec = await readOne(list[i]);
+          const file = list[i];
+          let rec = await withTimeout(readOne(file), FILE_TIMEOUT_MS);
+          if (rec.__timedOut) {
+            // No se abandona el archivo sin dejar rastro: se cuenta como
+            // fallido y se sigue, en vez de dejar la barra congelada.
+            rec = {
+              name: file.name, size: file.size, kind: kindOf(file),
+              lat: null, lng: null, takenAt: file.lastModified || null,
+              model: null, failed: true, timedOut: true
+            };
+          }
           rec.idx = i;
           records[i] = rec;
-          refs.set(i, list[i]);
+          refs.set(i, file);
           done++;
           if (done % 25 === 0 || done === total) onProgress(done, total, rec);
         }
