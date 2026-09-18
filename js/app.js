@@ -43,6 +43,8 @@
       trackWidth: 1.2,
       trackOpacity: 0.3,
       trackDotSize: 1.3,
+      trackByMode: false,
+      showDistance: false,
       showRoute: true,
       routeDashed: true,
       routeWidth: 2.4,
@@ -211,8 +213,18 @@
       theme: theme(),
       width: s.trackWidth,
       opacity: s.trackOpacity,
-      dotSize: s.trackDotSize
+      dotSize: s.trackDotSize,
+      segments: trackSegments()
     });
+  }
+
+  /* Los tramos coloreados salen de las fotos del viaje, no de la traza
+     guardada: la traza va simplificada y ya no se puede decir qué par de
+     fotos generó cada vértice. */
+  function trackSegments() {
+    if (!state.mapDoc.settings.trackByMode) return null;
+    const st = travel();
+    return st && st.segments.length ? st.segments : null;
   }
 
   function syncRoute() {
@@ -643,9 +655,88 @@
     }
   }
 
+  /* ---------------- distancia recorrida ----------------
+     Se calcula sobre TODAS las fotos del viaje, no solo sobre los pines: la
+     distancia real la marca el carrete entero, y con doce pines sueltos daría
+     una cifra sin sentido. El resultado se cachea porque syncTrack y el panel
+     lo piden en cada repintado. */
+  let travelCache = { src: null, stats: null, source: '' };
+  function travelSource() {
+    const trip = tripPhotos();
+    if (trip.length > 1) return { list: trip, kind: 'trip' };
+    /* Un mapa hecho a mano no tiene el carrete del viaje detrás. Con los
+       pines colocados se puede dar una cifra igualmente, pero se avisa de
+       que sale de un puñado de puntos y no del recorrido real. */
+    const pins = ordered().filter((p) => p.takenAt != null);
+    return { list: pins, kind: 'pins' };
+  }
+
+  function travel() {
+    const { list, kind } = travelSource();
+    /* Con los pines la lista se reconstruye en cada llamada, así que la caché
+       no puede ir por identidad del array: se usa una firma barata. */
+    let key = kind + ':' + list.length;
+    if (kind === 'pins') {
+      // Son pocos y el usuario los mueve a mano: la firma incluye posiciones.
+      for (const p of list) key += '|' + p.lat.toFixed(4) + ',' + p.lng.toFixed(4) + ',' + p.takenAt;
+    } else if (list.length) {
+      key += ':' + list[0].takenAt + '-' + list[list.length - 1].takenAt;
+    }
+    if (travelCache.src !== key) {
+      travelCache = { src: key, stats: list.length > 1 ? Trips.travelStats(list) : null, source: kind };
+    }
+    return travelCache.stats;
+  }
+
+  function travelLine() {
+    const st = travel();
+    return st ? Trips.travelLine(st) : '';
+  }
+
+  function renderTravel() {
+    const sec = $('travelSection');
+    if (!sec) return;
+    const st = travel();
+    if (!st || !(st.totalKm > 0)) { sec.hidden = true; return; }
+    sec.hidden = false;
+    $('travelTotal').textContent = Trips.fmtKm(st.totalKm);
+
+    const ul = $('travelBreak');
+    ul.innerHTML = '';
+    Trips.MODES.filter((m) => st.byMode[m] > 0)
+      .sort((a, b) => st.byMode[b] - st.byMode[a])
+      .forEach((m) => {
+        const li = document.createElement('li');
+        const pct = Math.round((st.byMode[m] / st.totalKm) * 100);
+        li.innerHTML = `<span class="dot" style="background:${MapView.MODE_COLORS[m]}"></span>`
+          + `<span>${escapeHtml(Trips.MODE_LABELS[m])}</span>`
+          + `<span class="km">${Trips.fmtKm(st.byMode[m])}</span>`
+          + `<span class="pct">${pct}%</span>`;
+        ul.appendChild(li);
+      });
+
+    /* La honestidad del cálculo va escrita al lado de la cifra, no escondida:
+       esto es una estimación entre fotos, no un GPS siguiendo la carretera. */
+    const partes = [travelCache.source === 'pins'
+      ? `Calculado solo con los ${st.photos} pines del mapa, no con el carrete del `
+        + 'viaje: es un mínimo, no la distancia recorrida.'
+      : 'Estimado en línea recta entre fotos seguidas: por carretera '
+        + 'o andando en zigzag, la distancia real es mayor.'];
+    if (st.medianGapMin > 20) {
+      partes.push(`Entre foto y foto pasan ${Math.round(st.medianGapMin)} min de mediana, `
+        + 'así que se pierde todo lo que ocurrió en medio.');
+    }
+    if (st.unknownShare > 0.15) {
+      partes.push(`${Math.round(st.unknownShare * 100)}% de la distancia no se puede `
+        + 'atribuir a un medio (tramos cortos con muchas horas de hueco).');
+    }
+    $('travelNote').textContent = partes.join(' ');
+  }
+
   function groupRowsVisible() { return state.groupLimit || MAX_GROUP_ROWS; }
 
   function renderGroups() {
+    renderTravel();
     const section = $('groupSection');
     const photos = tripPhotos();
     if (!photos.length) {
@@ -1013,6 +1104,7 @@
     st.style.setProperty('--sub-base', lay.subBase);
     st.style.setProperty('--sub-size', lay.subSize);
     st.style.setProperty('--coords-base', lay.coordsBase);
+    st.style.setProperty('--dist-base', lay.distBase);
     st.style.setProperty('--legend-base', lay.legendBase);
     st.style.setProperty('--text-align', lay.align);
     st.style.setProperty('--text-pad', lay.pad + 'cqw');
@@ -1039,6 +1131,10 @@
       $('ovCoords').textContent = Exporter.fmtCoords(c.lat, c.lng);
     }
     $('ovCoords').hidden = !s.showCoords;
+
+    const dist = s.showDistance ? travelLine() : '';
+    $('ovDistance').textContent = dist;
+    $('ovDistance').hidden = !dist;
     $('ovBrand').hidden = !s.showFooter;
   }
 
@@ -1399,6 +1495,8 @@
     $('inCoords').checked = !!s.showCoords;
     $('inFooter').checked = !!s.showFooter;
     $('inLegend').checked = !!s.showLegend;
+    $('inTrackByMode').checked = !!s.trackByMode;
+    $('inShowDistance').checked = !!s.showDistance;
     $('orderMode').value = s.orderMode;
     $('groupRadius').value = radiusIndex(s.groupRadiusM || 350);
     $('groupRadiusVal').textContent = fmtDist(s.groupRadiusM || 350);
@@ -1606,6 +1704,8 @@
         thumbs,
         routeCoords: list.map((p) => [p.lng, p.lat]),
         trackCoords: state.mapDoc.track || [],
+        trackSegments: trackSegments(),
+        distance: s.showDistance ? travelLine() : '',
         editorWidth: $('stage').clientWidth,
         camera: cam
       });
@@ -1777,6 +1877,8 @@
     bindCheck('inCoords', 'showCoords', updateOverlay);
     bindCheck('inFooter', 'showFooter', updateOverlay);
     bindCheck('inLegend', 'showLegend', updateOverlay);
+    bindCheck('inTrackByMode', 'trackByMode', syncTrack);
+    bindCheck('inShowDistance', 'showDistance', updateOverlay);
     $('orderMode').addEventListener('change', (e) => {
       state.mapDoc.settings.orderMode = e.target.value;
       if (e.target.value === 'manual') reindexManual();

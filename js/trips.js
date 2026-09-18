@@ -221,6 +221,116 @@
     return rankGroups(stops(photos, opts), n, opts).map((g) => g.rep);
   }
 
+  /* Distancia recorrida y medio de transporte estimados a partir de las fotos.
+
+     Dos avisos que condicionan todo el cálculo:
+
+     1. La distancia es una cota INFERIOR. Se suman líneas rectas entre fotos
+        consecutivas, así que cuanto menos fotos, más corto sale. Con fotos
+        cada pocos minutos se acerca bastante; con cuatro fotos en toda la
+        tarde, no.
+     2. La velocidad media solo es fiable en un sentido. Si sale alta, hubo
+        motor seguro (no se puede fingir). Si sale baja, no dice nada cuando
+        el hueco es largo: en un viaje real hay un tramo de 69 km a 4,9 km/h
+        de media que fue coche con una noche de por medio, y que por
+        velocidad parecería un paseo. Por eso los huecos largos con poca
+        velocidad se marcan "sin determinar" en vez de inventar un medio. */
+  const MODES = ['pie', 'rueda', 'motor', 'rapido', 'desconocido'];
+
+  const TRAVEL_DEFAULTS = {
+    noiseKm: 0.02,        // por debajo de 20 m es ruido de GPS, no movimiento
+    walkKmh: 6,
+    wheelKmh: 25,
+    motorKmh: 120,
+    walkMaxKm: 12,        // nadie hace 12 km de un tirón entre dos fotos andando
+    confidentGapH: 1.5    // con más hueco que esto, una velocidad baja no prueba nada
+  };
+
+  function classifySegment(km, hours, o) {
+    const v = hours > 0 ? km / hours : Infinity;
+    if (v > o.motorKmh) return { mode: 'rapido', v };
+    if (v > o.wheelKmh) return { mode: 'motor', v };
+    if (v > o.walkKmh) return { mode: 'rueda', v };
+    // Velocidad baja: solo concluyente si además el tramo es corto y seguido.
+    if (km > o.walkMaxKm) return { mode: 'motor', v };
+    if (hours <= o.confidentGapH) return { mode: 'pie', v };
+    return { mode: 'desconocido', v };
+  }
+
+  function travelStats(photos, opts) {
+    const o = Object.assign({}, TRAVEL_DEFAULTS, opts);
+    const list = photos.filter((r) => r.lat != null && r.takenAt != null)
+      .sort((a, b) => a.takenAt - b.takenAt);
+
+    const byMode = {};
+    for (const m of MODES) byMode[m] = 0;
+    const segments = [];
+    const gaps = [];
+    let totalKm = 0, skipped = 0;
+
+    for (let i = 1; i < list.length; i++) {
+      const a = list[i - 1], b = list[i];
+      const km = haversine(a.lat, a.lng, b.lat, b.lng);
+      const hours = (b.takenAt - a.takenAt) / 3600000;
+      gaps.push(hours * 60);
+      if (km < o.noiseKm) { skipped++; continue; }
+      const { mode, v } = classifySegment(km, hours, o);
+      byMode[mode] += km;
+      totalKm += km;
+      segments.push({ km, hours, kmh: v, mode, from: [a.lng, a.lat], to: [b.lng, b.lat] });
+    }
+
+    gaps.sort((x, y) => x - y);
+    return {
+      totalKm,
+      byMode,
+      segments,
+      photos: list.length,
+      noiseSkipped: skipped,
+      medianGapMin: gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0,
+      // Qué parte de la distancia no se pudo atribuir: es la medida honesta
+      // de cuánto fiarse del reparto por medio de transporte.
+      unknownShare: totalKm > 0 ? byMode.desconocido / totalKm : 0
+    };
+  }
+
+  const MODE_LABELS = {
+    pie: 'a pie',
+    rueda: 'en bici o patinete',
+    motor: 'en vehículo',
+    rapido: 'en avión o tren',
+    desconocido: 'sin determinar'
+  };
+  const MODE_SHORT = {
+    pie: 'a pie', rueda: 'en bici', motor: 'en vehículo',
+    rapido: 'en avión', desconocido: 'sin determinar'
+  };
+
+  function fmtKm(km) {
+    if (km < 1) return Math.round(km * 1000) + ' m';
+    if (km < 10) return km.toFixed(1).replace('.', ',') + ' km';
+    return Math.round(km) + ' km';
+  }
+
+  /* Una sola línea para el póster. La calcula este módulo para que el editor
+     y la imagen exportada digan exactamente lo mismo. Como máximo dos medios:
+     con cinco, la línea se hace ilegible a tamaño de póster. */
+  function travelLine(stats, maxModes) {
+    if (!stats || !(stats.totalKm > 0)) return '';
+    const top = MODES.filter((m) => stats.byMode[m] / stats.totalKm >= 0.03)
+      .sort((a, b) => stats.byMode[b] - stats.byMode[a])
+      .slice(0, maxModes == null ? 2 : maxModes);
+    // Si prácticamente todo fue de un medio, repetir la cifra sobra. Y si ese
+    // medio es "sin determinar", ponerlo en el póster no informa de nada.
+    if (top.length === 1) {
+      return top[0] === 'desconocido' ? fmtKm(stats.totalKm)
+        : fmtKm(stats.totalKm) + ' ' + MODE_SHORT[top[0]];
+    }
+    return [fmtKm(stats.totalKm)]
+      .concat(top.map((m) => fmtKm(stats.byMode[m]) + ' ' + MODE_SHORT[m]))
+      .join(' · ');
+  }
+
   /* Douglas-Peucker sobre [lng,lat]: 3000 puntos de traza no aportan más que
      300 y sí pesan al guardar y al dibujar. */
   function simplify(points, epsilon) {
@@ -256,5 +366,7 @@
     return (a === b ? a : `${a} – ${b}`) + ' ' + y;
   }
 
-  return { haversine, detectHome, detect, stops, representative, rankGroups, suggestPins, simplify, label, DEFAULTS };
+  return { haversine, detectHome, detect, stops, representative, rankGroups, suggestPins,
+           travelStats, classifySegment, travelLine, fmtKm,
+           MODES, MODE_LABELS, MODE_SHORT, TRAVEL_DEFAULTS, simplify, label, DEFAULTS };
 }));

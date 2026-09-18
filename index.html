@@ -142,6 +142,20 @@
         <ul id="groupList" class="grouplist"></ul>
       </div>
 
+      <div id="travelSection" class="section" hidden>
+        <div class="section-head">
+          <h3>Recorrido <span id="travelTotal" class="pill">0 km</span></h3>
+        </div>
+        <ul id="travelBreak" class="travel-list"></ul>
+        <p id="travelNote" class="tiny muted"></p>
+        <div class="btn-row">
+          <label class="check tiny"><input type="checkbox" id="inTrackByMode">
+            Colorear la traza por medio</label>
+          <label class="check tiny"><input type="checkbox" id="inShowDistance">
+            Poner la distancia en el póster</label>
+        </div>
+      </div>
+
       <div class="section">
         <div class="section-head">
           <h3>Sin ubicar <span id="unplacedCount" class="pill warn">0</span></h3>
@@ -197,6 +211,7 @@
           <div id="ovRule" class="ov-rule"></div>
           <div id="ovSubtitle" class="ov-subtitle">COSTA RICA</div>
           <div id="ovCoords" class="ov-coords">9.9395° N / 84.0663° W</div>
+          <div id="ovDistance" class="ov-distance" hidden></div>
           <div class="overlay-footer">
             <span id="ovBrand">fotos-recorrido</span>
             <span id="ovAttrib">© OpenStreetMap contributors</span>

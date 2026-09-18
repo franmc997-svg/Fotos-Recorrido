@@ -97,6 +97,73 @@ comprobar('sin ninguna ubicación no hay viajes',
 comprobar('un carrete que es un solo viaje da un viaje',
   Trips.detect(recs.filter((r) => r.takenAt > T0 + 119 * D && r.takenAt < T0 + 129 * D)).length === 1);
 
+
+{
+/* ---- Distancia recorrida y medio de transporte ----
+   Los dos primeros casos salen del viaje real del usuario (Madrid-Toledo-
+   Segovia) y son la trampa que hundiría a un clasificador ingenuo: 69 km
+   entre dos fotos con una noche de por medio dan 4,9 km/h de media, que
+   "parece" andando. */
+const c = (km, h) => Trips.classifySegment(km, h, Trips.TRAVEL_DEFAULTS).mode;
+
+comprobar('69 km a 4,9 km/h de media NO es un paseo (es motor)',
+  c(68.88, 14.0) === 'motor', c(68.88, 14.0));
+comprobar('122 km a 30,8 km/h es motor',
+  c(121.95, 3.96) === 'motor', c(121.95, 3.96));
+comprobar('1,2 km en 13 h no se puede atribuir: queda sin determinar',
+  c(1.17, 13.4) === 'desconocido', c(1.17, 13.4));
+comprobar('800 m en 12 min sí es a pie', c(0.8, 0.2) === 'pie', c(0.8, 0.2));
+comprobar('8 km en 30 min es de rueda (bici/patinete)',
+  c(8, 0.5) === 'rueda', c(8, 0.5));
+comprobar('500 km en 2 h es transporte rápido',
+  c(500, 2) === 'rapido', c(500, 2));
+
+// Paseo de una tarde: 12 fotos cada 10 min avanzando ~400 m cada vez.
+const paseo = [];
+for (let i = 0; i < 12; i++) {
+  paseo.push({ lat: 40.4168 + i * 0.0036, lng: -3.7038, takenAt: Date.UTC(2024, 3, 2, 10) + i * 600000 });
+}
+const tp = Trips.travelStats(paseo);
+comprobar('un paseo de 12 fotos suma ~4,4 km',
+  Math.abs(tp.totalKm - 4.4) < 0.3, tp.totalKm.toFixed(2));
+comprobar('y se atribuye entero a "a pie"',
+  tp.byMode.pie === tp.totalKm && tp.unknownShare === 0);
+
+// Mismo paseo + un traslado en coche al final.
+const mixto = paseo.concat([
+  { lat: 39.8628, lng: -4.0273, takenAt: Date.UTC(2024, 3, 2, 12, 30) }
+]);
+const tm = Trips.travelStats(mixto);
+comprobar('al añadir un traslado, la distancia a motor domina el total',
+  tm.byMode.motor > tm.byMode.pie * 10, JSON.stringify(tm.byMode));
+comprobar('el reparto por medios cuadra con el total',
+  Math.abs(Trips.MODES.reduce((s, m) => s + tm.byMode[m], 0) - tm.totalKm) < 1e-9);
+comprobar('los tramos llevan sus extremos para poder pintarlos',
+  tm.segments.length === 12 && tm.segments[0].from.length === 2);
+
+// Fotos quietas: no deben inflar la distancia con ruido de GPS.
+const quietas = [];
+for (let i = 0; i < 20; i++) {
+  quietas.push({ lat: 40.4168 + (i % 2) * 0.00005, lng: -3.7038, takenAt: Date.UTC(2024, 3, 2, 10) + i * 60000 });
+}
+const tq = Trips.travelStats(quietas);
+comprobar('20 fotos en el mismo sitio no suman distancia',
+  tq.totalKm === 0 && tq.noiseSkipped === 19, JSON.stringify({ km: tq.totalKm, ruido: tq.noiseSkipped }));
+
+// La línea del póster
+const linea = (st) => Trips.travelLine(st);
+comprobar('la línea del póster reparte el total entre los medios',
+  linea(tm) === '76 km · 72 km en vehículo · 4,4 km a pie', linea(tm));
+comprobar('con un solo medio no repite la cifra',
+  linea(tp) === '4,4 km a pie', linea(tp));
+comprobar('si todo queda sin atribuir, el póster solo lleva la distancia',
+  linea({ totalKm: 3.1, byMode: { pie: 0, rueda: 0, motor: 0, rapido: 0, desconocido: 3.1 } }) === '3,1 km');
+comprobar('sin distancia no hay línea', linea(null) === '' && linea(tq) === '');
+
+const tv = Trips.travelStats([]);
+comprobar('sin fotos no revienta', tv.totalKm === 0 && tv.unknownShare === 0);
+}
+
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');
 
 /* --- Caso real reportado: biblioteca pequeña, sin residencia detectable,
@@ -131,6 +198,8 @@ comprobar('pero el diagnóstico explica por qué (no queda mudo)',
 const conMinHoraCero = Trips.detect(tardeCorta, { minHours: 0 });
 comprobar('bajando la duración mínima a 0, esas 47 fotos sí forman un viaje',
   conMinHoraCero.length === 1 && conMinHoraCero[0].photos.length === 47);
+
+
 
 console.log(fallos ? `\n${fallos} comprobaciones fallidas en total` : '\nTodo correcto (incluyendo el caso reportado)');
 process.exit(fallos ? 1 : 0);

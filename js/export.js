@@ -137,6 +137,7 @@
     ruleY: 14.6, ruleW: 17.6,
     subBase: 11.4, subSize: 2.5, subTrack: 0.14, subBudget: 76, subOfTitle: 0.42,
     coordsBase: 7.4, coordsSize: 1.6,
+    distBase: 4.8, distSize: 1.5,
     footBase: 2.4, footSize: 1.3, footPad: 2.4,
     legendBase: 27.5, legendSize: 1.7, legendLine: 2.6, legendX: 5.2, legendGap: 3.6
   };
@@ -206,6 +207,7 @@
       subBase: L.subBase + dy,
       subSize,
       coordsBase: L.coordsBase + dy,
+      distBase: L.distBase + dy,
       legendBase: L.legendBase + dy
     };
   }
@@ -294,6 +296,14 @@
       ctx.textAlign = 'center';
     }
 
+    if (o.distance) {
+      ctx.font = `400 ${L.distSize * u}px ${MONO}`;
+      ctx.fillStyle = theme.sub;
+      ctx.textAlign = anchor;
+      ctx.fillText(o.distance, cx, H - lay.distBase * u);
+      ctx.textAlign = 'center';
+    }
+
     // La atribución de OSM/CARTO es obligatoria por licencia: se dibuja siempre.
     ctx.font = `400 ${L.footSize * u}px ${MONO}`;
     ctx.fillStyle = hexToRgba(theme.dim, 0.9);
@@ -306,6 +316,7 @@
   }
 
   /* opts: { aspect, quality, format, settings, photos, thumbs, editorWidth,
+             trackCoords, trackSegments, distance,
              camera:{center,zoom,bearing} } */
   async function render(opts) {
     const base = window.ASPECTS[opts.aspect] || window.ASPECTS['9:16'];
@@ -352,7 +363,8 @@
         theme,
         width: (opts.settings.trackWidth || 1.2) * scale,
         opacity: opts.settings.trackOpacity,
-        dotSize: opts.settings.trackDotSize == null ? 1.3 : opts.settings.trackDotSize * scale
+        dotSize: opts.settings.trackDotSize == null ? 1.3 : opts.settings.trackDotSize * scale,
+        segments: opts.trackSegments
       });
       MapView.ensureRouteLayers(map, theme);
       MapView.setRoute(map, opts.routeCoords, {
@@ -400,6 +412,7 @@
         coords: opts.settings.showCoords ? fmtCoords(c.lat, c.lng) : '',
         footer: !!opts.settings.showFooter,
         brand: 'fotos-recorrido',
+        distance: opts.distance || '',
         legend: !!opts.settings.showLegend,
         legendItems: opts.settings.showLegend
           ? opts.photos.slice(0, 12).map((p) => (p.caption || p.name || '').slice(0, 40))

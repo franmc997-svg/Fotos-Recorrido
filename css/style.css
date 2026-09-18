@@ -294,6 +294,12 @@ label.check input{accent-color:var(--ui-accent)}
   font-family:ui-monospace,Menlo,Consolas,monospace;
   text-align:var(--text-align,center);padding:0 var(--text-pad,0);
 }
+.ov-distance{
+  bottom:calc(var(--dist-base,4.8) * 1cqw - 0.2em);
+  font-size:1.5cqw;line-height:1;color:var(--sub,#b9a8dd);
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  text-align:var(--text-align,center);padding:0 var(--text-pad,0);
+}
 .ov-legend{
   bottom:calc(var(--legend-base,27.5) * 1cqw - 0.2em);left:5.2cqw;right:5.2cqw;text-align:left;
   font-size:1.7cqw;line-height:calc(2.6 / 1.7);
@@ -374,3 +380,11 @@ label.check input{accent-color:var(--ui-accent)}
   .topbar{flex-wrap:wrap;height:auto;padding:8px 10px;gap:8px}
   .topbar-actions{margin-left:0}
 }
+
+/* Reparto de la distancia por medio de transporte. El cuadrito de color es el
+   mismo que el de la traza coloreada, para poder leer el mapa sin leyenda. */
+.travel-list{list-style:none;margin:6px 0 4px;padding:0;display:grid;gap:3px}
+.travel-list li{display:flex;align-items:center;gap:8px;font-size:12px}
+.travel-list .dot{width:10px;height:3px;border-radius:2px;flex:none}
+.travel-list .km{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink,#e8e4f5)}
+.travel-list .pct{color:var(--muted,#8b83a8);font-size:11px;min-width:34px;text-align:right}
