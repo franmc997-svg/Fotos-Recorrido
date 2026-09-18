@@ -271,6 +271,41 @@
 
   function fmtInt(n) { return n.toLocaleString('es'); }
 
+  /* Reconecta pines huérfanos por nombre de archivo tras un nuevo escaneo.
+     state.fileRefs solo vive en memoria: en cuanto la pestaña se recarga (muy
+     normal en Safari de iPhone, que mata pestañas en segundo plano por
+     memoria), esa referencia se pierde para siempre y ya no hay forma de leer
+     los píxeles originales de un pin cuya foto no se había cargado todavía.
+     Volver a escanear la misma carpeta trae los mismos archivos con un índice
+     nuevo: aquí se enlazan de nuevo por nombre, en cualquier mapa, no solo el
+     abierto. No es infalible (dos fotos con el mismo nombre en carpetas
+     distintas colisionan), pero es gratis y arregla el caso normal. */
+  async function reconnectMissingThumbs(refs) {
+    const byName = new Map();
+    for (const [idx, file] of refs) {
+      if (!byName.has(file.name)) byName.set(file.name, idx);
+    }
+    if (!byName.size) return 0;
+
+    let count = 0;
+    const maps = await DB.allMaps();
+    for (const m of maps) {
+      const photos = await DB.photosOf(m.id);
+      for (const p of photos) {
+        if (p.thumb || !byName.has(p.name)) continue;
+        p.scanIdx = byName.get(p.name);
+        await DB.putPhoto(photoRecord(p));
+        count++;
+        if (state.mapDoc && m.id === state.mapDoc.id) {
+          const live = state.photos.find((x) => x.id === p.id);
+          if (live) live.scanIdx = p.scanIdx;
+        }
+      }
+    }
+    if (count && state.mapDoc) { renderLists(); if (state.selectedId) select(state.selectedId); }
+    return count;
+  }
+
   async function startScan(files) {
     const list = [...files].filter((f) => {
       const k = Scan.kindOf(f);
@@ -301,6 +336,7 @@
     $('scanCancelRow').hidden = true;
 
     state.fileRefs = refs;
+    const reconnected = await reconnectMissingThumbs(refs);
     const located = records.filter((r) => r.lat != null).length;
     const heic = records.filter((r) => r.kind === 'heic').length;
     const timedOut = records.filter((r) => r.timedOut).length;
@@ -328,6 +364,9 @@
         : '<br>No detecté una residencia: trato todas las fotos como viaje.') +
       (timedOut
         ? `<br><b>${fmtInt(timedOut)}</b> foto(s) tardaron demasiado en leerse (posiblemente aún en iCloud, no descargadas al dispositivo) y quedaron sin ubicación.`
+        : '') +
+      (reconnected
+        ? `<br><b>${fmtInt(reconnected)}</b> pin(es) de tus mapas recuperaron el acceso a su foto original: ya puedes cargar su imagen.`
         : '') +
       (cancelled ? '<br><b>Escaneo cancelado.</b>' : '');
 
@@ -723,6 +762,7 @@
     state.selectedId = null;
     $('selPanel').hidden = true;
     $('selEmpty').hidden = false;
+    $('selNoImg').hidden = true;
   }
 
   function fillSelection(p) {
@@ -733,7 +773,20 @@
     $('selLat').value = p.lat != null ? p.lat.toFixed(6) : '';
     $('selLng').value = p.lng != null ? p.lng.toFixed(6) : '';
     $('selDate').value = p.takenAt ? toLocalInput(p.takenAt) : '';
-    $('selLoadImg').hidden = !!p.thumb || p.scanIdx == null || !state.fileRefs.has(p.scanIdx);
+
+    const canLoad = !p.thumb && p.scanIdx != null && state.fileRefs.has(p.scanIdx);
+    $('selLoadImg').hidden = !canLoad;
+    const noImg = $('selNoImg');
+    if (p.thumb) {
+      noImg.hidden = true;
+    } else if (canLoad) {
+      noImg.hidden = false;
+      noImg.textContent = 'Todavía no se cargó la imagen de esta foto.';
+    } else {
+      noImg.hidden = false;
+      noImg.textContent = 'No tengo el archivo original en esta sesión (se perdió al recargar la página). '
+        + 'Vuelve a escanear la misma carpeta en «Biblioteca»: si esta foto sigue ahí, la reconecto por su nombre.';
+    }
   }
 
   function toLocalInput(ms) {
