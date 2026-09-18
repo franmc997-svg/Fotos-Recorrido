@@ -44,12 +44,19 @@
     <section id="tabLib" class="tabpane">
       <p class="tiny muted">
         Del carrete solo leo la ubicación y la fecha del EXIF: no decodifico ni
-        copio las fotos. Miles tardan un par de minutos. Los HEIC del iPhone
-        valen tal cual.
+        copio las fotos. Los HEIC del iPhone valen tal cual.
+      </p>
+      <p class="tiny muted">
+        <strong>En iPhone, selecciona de 200 en 200</strong> como mucho: con
+        más, el propio selector de fotos de iOS se queda preparándolas
+        durante minutos antes de que la página vea ninguna — eso no depende
+        de esta app. Puedes repetir «Escanear fotos…» varias veces: cada
+        tanda se suma a las anteriores, no las borra.
       </p>
       <div class="btn-row">
         <button id="btnScanFiles" class="btn primary">Escanear fotos…</button>
         <button id="btnScanFolder" class="btn ghost">Carpeta…</button>
+        <button id="btnScanClear" class="btn ghost danger tiny">Vaciar biblioteca</button>
       </div>
       <input type="file" id="scanInput" accept="image/*,.heic,.heif,.HEIC,.HEIF" multiple hidden>
       <input type="file" id="scanFolderInput" webkitdirectory directory multiple hidden>

@@ -335,8 +335,18 @@
     prog.hidden = true;
     $('scanCancelRow').hidden = true;
 
-    state.fileRefs = refs;
+    // El escaneo suma a lo que ya había, no lo sustituye: en iOS no se puede
+    // seleccionar el carrete entero de una vez (el propio selector nativo se
+    // atasca preparando cientos de fotos antes de que la página vea nada), así
+    // que escanear tiene que poder hacerse en varias tandas.
+    for (const [key, file] of refs) state.fileRefs.set(key, file);
     const reconnected = await reconnectMissingThumbs(refs);
+
+    const prevRecords = (state.library && state.library.records) || [];
+    const byKey = new Map(prevRecords.map((r) => [r.idx, r]));
+    for (const r of records) byKey.set(r.idx, r);
+    const allRecords = [...byKey.values()];
+
     const located = records.filter((r) => r.lat != null).length;
     const heic = records.filter((r) => r.kind === 'heic').length;
     const timedOut = records.filter((r) => r.timedOut).length;
@@ -344,7 +354,7 @@
 
     state.library = {
       id: LIB_ID,
-      records: records.map((r) => ({
+      records: allRecords.map((r) => ({
         idx: r.idx, name: r.name, kind: r.kind,
         lat: r.lat, lng: r.lng, takenAt: r.takenAt
       })),
@@ -354,9 +364,11 @@
     state.library.home = Trips.detectHome(state.library.records);
     await DB.putLibrary(state.library);
 
+    const addedNote = allRecords.length !== records.length
+      ? ` (${fmtInt(allRecords.length)} en total con tandas anteriores)` : '';
     $('scanSummary').hidden = false;
     $('scanSummary').innerHTML =
-      `<b>${fmtInt(records.length)}</b> fotos leídas en ${secs}&nbsp;s · ` +
+      `<b>${fmtInt(records.length)}</b> fotos leídas en ${secs}&nbsp;s${addedNote} · ` +
       `<b>${fmtInt(located)}</b> con ubicación · ${fmtInt(records.length - located)} sin ella` +
       (heic ? ` · ${fmtInt(heic)} en HEIC` : '') +
       (state.library.home
@@ -1162,6 +1174,15 @@
     $('scanInput').addEventListener('change', (e) => { startScan(e.target.files); e.target.value = ''; });
     $('scanFolderInput').addEventListener('change', (e) => { startScan(e.target.files); e.target.value = ''; });
     $('btnScanCancel').addEventListener('click', () => { if (state.scan) state.scan.cancel(); });
+    $('btnScanClear').addEventListener('click', async () => {
+      if (!state.library || !state.library.records.length) return;
+      if (!confirm('¿Vaciar la biblioteca escaneada? Los mapas y sus pines no se tocan; solo se olvida qué fotos había en el carrete y qué archivos quedan disponibles para cargar imágenes nuevas.')) return;
+      state.library = null;
+      state.fileRefs.clear();
+      await DB.putLibrary({ id: LIB_ID, records: [], home: null, scannedAt: Date.now() });
+      $('scanSummary').hidden = true;
+      renderTrips();
+    });
     $('tripIgnoreHome').addEventListener('change', renderTrips);
     $('tripGap').addEventListener('input', (e) => {
       $('tripGapVal').textContent = e.target.value;

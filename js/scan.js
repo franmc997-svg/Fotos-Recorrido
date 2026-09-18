@@ -8,6 +8,16 @@
 (function () {
   const CONCURRENCY = 8;
 
+  /* Clave estable del archivo, no su posición en esta tanda. iOS no deja
+     seleccionar miles de fotos de una vez (el propio selector nativo se
+     queda atascado preparándolas antes de que la página vea un solo
+     archivo), así que escanear tiene que poder hacerse en varias tandas que
+     se sumen entre sí. Con un índice posicional (0, 1, 2…) dos tandas
+     distintas producen las mismas claves y una pisa a la otra; con esto no. */
+  function fileKey(file) {
+    return file.name + '::' + file.size + '::' + file.lastModified;
+  }
+
   function extOf(name) {
     const m = /\.([a-z0-9]+)$/i.exec(name || '');
     return m ? m[1].toLowerCase() : '';
@@ -92,7 +102,7 @@
     const onProgress = (opts && opts.onProgress) || (() => {});
     const conc = (opts && opts.concurrency) || CONCURRENCY;
     const records = new Array(total);
-    const refs = new Map(); // índice -> File, solo mientras dure la sesión
+    const refs = new Map(); // fileKey -> File, solo mientras dure la sesión
     let next = 0, done = 0, cancelled = false;
 
     const promise = (async () => {
@@ -111,9 +121,9 @@
               model: null, failed: true, timedOut: true
             };
           }
-          rec.idx = i;
+          rec.idx = fileKey(file);
           records[i] = rec;
-          refs.set(i, file);
+          refs.set(rec.idx, file);
           done++;
           if (done % 25 === 0 || done === total) onProgress(done, total, rec);
         }
