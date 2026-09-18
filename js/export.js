@@ -162,8 +162,54 @@
     return per > 0 ? Math.min(L.titleMax, L.titleBudget / per) : L.titleMax;
   }
 
+  /* El tamaño al que el título ocupa justo el ancho disponible. Sirve de
+     techo al control de tamaño: dejar que lo supere solo consigue un título
+     cortado por el borde, tanto en la vista previa como en el PNG. */
+  function titleMaxCqw(text) {
+    const t = (text || '').toUpperCase();
+    if (!t) return L.titleMax;
+    const per = trackedWidthPerUnit(t, 300, L.titleTrack, FONT);
+    return per > 0 ? L.titleBudget / per : L.titleMax;
+  }
+
+  function subtitleMaxCqw(text) {
+    const t = (text || '').toUpperCase();
+    if (!t) return L.subSize;
+    const per = trackedWidthPerUnit(t, 400, L.subTrack, FONT);
+    return per > 0 ? L.subBudget / per : L.subSize;
+  }
+
   /* El subtítulo nunca puede acercarse al tamaño del título: si un título
      largo se encoge, el subtítulo se encoge con él o se pierde la jerarquía. */
+  /* Layout efectivo según los ajustes del mapa: una sola función que usan
+     tanto el exportador como la vista previa (que la convierte en variables
+     CSS). Si esto se duplicara, editor e imagen se separarían al primer
+     ajuste que el usuario tocara. */
+  function layoutFor(settings, title, subtitle) {
+    const st = settings || {};
+    const dy = st.textY || 0;
+    const align = st.textAlign || 'center';
+    const titleCap = titleMaxCqw(title);
+    const subCap = subtitleMaxCqw(subtitle);
+    const titleWanted = titleSizeCqw(title) * (st.titleScale || 1);
+    const subWanted = subtitleSizeCqw(subtitle, title) * (st.subScale || 1);
+    const titleSize = Math.max(1.2, Math.min(titleWanted, titleCap));
+    const subSize = Math.max(0.8, Math.min(subWanted, subCap));
+    return {
+      align,
+      titleCapped: titleWanted > titleCap + 0.01,
+      subCapped: subWanted > subCap + 0.01,
+      pad: align === 'center' ? 0 : L.legendX,
+      titleBase: L.titleBase + dy,
+      titleSize,
+      ruleY: L.ruleY + dy,
+      subBase: L.subBase + dy,
+      subSize,
+      coordsBase: L.coordsBase + dy,
+      legendBase: L.legendBase + dy
+    };
+  }
+
   function subtitleSizeCqw(text, title) {
     const t = (text || '').toUpperCase();
     if (!t) return L.subSize;
@@ -176,6 +222,19 @@
   function drawOverlay(ctx, W, H, o) {
     const theme = o.theme;
     const u = W / 100; // 1cqw
+    const lay = o.layout;
+    const cx = lay.align === 'left' ? lay.pad * u
+      : lay.align === 'right' ? W - lay.pad * u
+      : W / 2;
+    const anchor = lay.align === 'left' ? 'left' : lay.align === 'right' ? 'right' : 'center';
+
+    /* drawTracked centra siempre; para alinear a un lado se desplaza el punto
+       de anclaje por la mitad del ancho del texto. */
+    const tracked = (text, size, spacing, y) => {
+      const total = measureTracked(ctx, text, spacing);
+      const px = anchor === 'left' ? cx + total / 2 : anchor === 'right' ? cx - total / 2 : cx;
+      drawTracked(ctx, text, px, y, spacing);
+    };
 
     // Degradado inferior para que el texto se lea sobre el mapa.
     const g = ctx.createLinearGradient(0, H * 0.52, 0, H);
@@ -190,7 +249,7 @@
     if (o.legend && o.legendItems.length) {
       ctx.textAlign = 'left';
       ctx.font = `400 ${L.legendSize * u}px ${MONO}`;
-      let ly = H - L.legendBase * u - (o.legendItems.length - 1) * L.legendLine * u;
+      let ly = H - lay.legendBase * u - (o.legendItems.length - 1) * L.legendLine * u;
       for (let i = 0; i < o.legendItems.length; i++) {
         ctx.fillStyle = theme.accent;
         ctx.fillText(String(i + 1).padStart(2, '0'), L.legendX * u, ly);
@@ -204,30 +263,35 @@
 
     if (o.title) {
       const text = o.title.toUpperCase();
-      const size = titleSizeCqw(text) * u;
+      const size = lay.titleSize * u;
       ctx.font = `300 ${size}px ${FONT}`;
       ctx.fillStyle = theme.title;
-      drawTracked(ctx, text, W / 2, H - L.titleBase * u, size * L.titleTrack);
+      tracked(text, size, size * L.titleTrack, H - lay.titleBase * u);
 
+      const ruleX = lay.align === 'left' ? lay.pad * u + (L.ruleW / 2) * u
+        : lay.align === 'right' ? W - lay.pad * u - (L.ruleW / 2) * u
+        : W / 2;
       ctx.strokeStyle = hexToRgba(theme.title, 0.55);
       ctx.lineWidth = Math.max(1, 0.13 * u);
       ctx.beginPath();
-      ctx.moveTo(W / 2 - (L.ruleW / 2) * u, H - L.ruleY * u);
-      ctx.lineTo(W / 2 + (L.ruleW / 2) * u, H - L.ruleY * u);
+      ctx.moveTo(ruleX - (L.ruleW / 2) * u, H - lay.ruleY * u);
+      ctx.lineTo(ruleX + (L.ruleW / 2) * u, H - lay.ruleY * u);
       ctx.stroke();
     }
 
     if (o.subtitle) {
-      const size = subtitleSizeCqw(o.subtitle, o.title) * u;
+      const size = lay.subSize * u;
       ctx.font = `400 ${size}px ${FONT}`;
       ctx.fillStyle = theme.sub;
-      drawTracked(ctx, o.subtitle.toUpperCase(), W / 2, H - L.subBase * u, size * L.subTrack);
+      tracked(o.subtitle.toUpperCase(), size, size * L.subTrack, H - lay.subBase * u);
     }
 
     if (o.coords) {
       ctx.font = `400 ${L.coordsSize * u}px ${MONO}`;
       ctx.fillStyle = theme.dim;
-      ctx.fillText(o.coords, W / 2, H - L.coordsBase * u);
+      ctx.textAlign = anchor;
+      ctx.fillText(o.coords, cx, H - lay.coordsBase * u);
+      ctx.textAlign = 'center';
     }
 
     // La atribución de OSM/CARTO es obligatoria por licencia: se dibuja siempre.
@@ -282,16 +346,24 @@
       await new Promise((res) => map.once('load', res));
       MapView.applyTheme(map, theme, !!opts.settings.showLabels);
       MapView.ensureTrackLayers(map, theme);
+      const scale = cssW / 540; // el editor mide 540 css px de ancho a 1x
       MapView.setTrack(map, opts.trackCoords || [], {
         show: !!opts.settings.showTrack && (opts.trackCoords || []).length > 1,
-        theme
+        theme,
+        width: (opts.settings.trackWidth || 1.2) * scale,
+        opacity: opts.settings.trackOpacity,
+        dotSize: opts.settings.trackDotSize == null ? 1.3 : opts.settings.trackDotSize * scale
       });
       MapView.ensureRouteLayers(map, theme);
       MapView.setRoute(map, opts.routeCoords, {
         show: !!opts.settings.showRoute,
         dashed: !!opts.settings.routeDashed,
         theme,
-        width: 2.4 * (cssW / 540)
+        width: (opts.settings.routeWidth || 2.4) * scale,
+        dashLen: (opts.settings.routeDashLen || 4) * scale,
+        gapLen: (opts.settings.routeGapLen || 4) * scale,
+        opacity: opts.settings.routeOpacity,
+        glow: opts.settings.routeGlow !== false
       });
       map.triggerRepaint();
       await waitIdle(map, 30000);
@@ -309,15 +381,20 @@
 
       // Pines, en el mismo orden que la ruta.
       const pinW = MapView.PIN.baseWidth * (W / 1080) * (opts.settings.pinSize || 1);
-      const style = opts.settings.pinStyle || 'teardrop';
-      opts.photos.forEach((p, i) => {
+      const baseStyle = opts.settings.pinStyle || 'teardrop';
+      // Los terciarios van primero para que los principales queden encima.
+      const byTier = opts.photos.map((p, i) => ({ p, i }))
+        .sort((a, b) => MapView.tierOf(b.p) - MapView.tierOf(a.p));
+      for (const { p, i } of byTier) {
         const pt = map.project([p.lng, p.lat]);
-        drawPinCanvas(ctx, pt.x * RATIO, pt.y * RATIO, pinW, theme, style, i, opts.thumbs[p.id]);
-      });
+        const spec = MapView.pinSpec(p, baseStyle, pinW);
+        drawPinCanvas(ctx, pt.x * RATIO, pt.y * RATIO, spec.width, theme, spec.style, i, opts.thumbs[p.id]);
+      }
 
       const c = map.getCenter();
       drawOverlay(ctx, W, H, {
         theme,
+        layout: layoutFor(opts.settings, opts.settings.title, opts.settings.subtitle),
         title: opts.settings.title,
         subtitle: opts.settings.subtitle,
         coords: opts.settings.showCoords ? fmtCoords(c.lat, c.lng) : '',
@@ -341,5 +418,5 @@
     }
   }
 
-  window.Exporter = { render, fmtCoords, hexToRgba, LAYOUT: L, titleSizeCqw, subtitleSizeCqw };
+  window.Exporter = { render, fmtCoords, hexToRgba, LAYOUT: L, titleSizeCqw, subtitleSizeCqw, titleMaxCqw, layoutFor };
 })();

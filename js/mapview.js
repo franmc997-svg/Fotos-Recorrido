@@ -188,8 +188,17 @@
     });
     // La traza va por debajo de la ruta y en un tono apagado: si compite con
     // la línea que une los pines, el póster se vuelve ilegible.
-    if (map.getLayer('fr-track-line')) map.setPaintProperty('fr-track-line', 'line-color', opts.theme.accent);
-    if (map.getLayer('fr-track-dots')) map.setPaintProperty('fr-track-dots', 'circle-color', opts.theme.accent);
+    if (map.getLayer('fr-track-line')) {
+      map.setPaintProperty('fr-track-line', 'line-color', opts.theme.accent);
+      map.setPaintProperty('fr-track-line', 'line-width', opts.width || 1.2);
+      map.setPaintProperty('fr-track-line', 'line-opacity', opts.opacity == null ? 0.3 : opts.opacity);
+    }
+    if (map.getLayer('fr-track-dots')) {
+      map.setPaintProperty('fr-track-dots', 'circle-color', opts.theme.accent);
+      map.setPaintProperty('fr-track-dots', 'circle-radius', opts.dotSize == null ? 1.3 : opts.dotSize);
+      map.setPaintProperty('fr-track-dots', 'circle-opacity',
+        opts.dotSize === 0 ? 0 : (opts.opacity == null ? 0.38 : Math.min(1, opts.opacity * 1.25)));
+    }
   }
 
   function setRoute(map, coords, opts) {
@@ -203,14 +212,20 @@
     ['fr-route-glow', 'fr-route-line'].forEach((id) => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
     });
+    const w = opts.width || 2.4;
     if (map.getLayer('fr-route-line')) {
       map.setPaintProperty('fr-route-line', 'line-color', opts.theme.accent);
-      map.setPaintProperty('fr-route-line', 'line-width', opts.width || 2.4);
-      map.setPaintProperty('fr-route-line', 'line-dasharray', opts.dashed ? [1.6, 1.6] : [1, 0]);
+      map.setPaintProperty('fr-route-line', 'line-width', w);
+      map.setPaintProperty('fr-route-line', 'line-opacity', opts.opacity == null ? 1 : opts.opacity);
+      // line-dasharray va en múltiplos del grosor: para que la separación que
+      // el usuario elige en píxeles no cambie al engordar la línea, se divide.
+      map.setPaintProperty('fr-route-line', 'line-dasharray',
+        opts.dashed ? [(opts.dashLen || 4) / w, (opts.gapLen || 4) / w] : [1, 0]);
     }
     if (map.getLayer('fr-route-glow')) {
       map.setPaintProperty('fr-route-glow', 'line-color', opts.theme.accent);
-      map.setPaintProperty('fr-route-glow', 'line-width', (opts.width || 2.4) * 3.8);
+      map.setPaintProperty('fr-route-glow', 'line-width', w * 3.8);
+      map.setPaintProperty('fr-route-glow', 'line-opacity', opts.glow === false ? 0 : 0.35);
     }
   }
 
@@ -237,13 +252,38 @@
     return (stageWidthPx / 1080) * (userScale || 1);
   }
 
-  function buildPinElement(photo, index, theme, style, scale, thumbUrl) {
+  /* Niveles de pin. En un viaje entre ciudades no todos los sitios pesan
+     igual: los principales se ven grandes, los secundarios siguen enseñando
+     la foto pero ocupan la mitad, y los terciarios son solo el punto que
+     marca el lugar. Es lo que permite tener muchos pines sin que el póster
+     se convierta en un amasijo. */
+  const TIER_SCALE = { 1: 1, 2: 0.6, 3: 0.34 };
+
+  function tierOf(photo) {
+    const t = photo && photo.tier;
+    return t === 2 || t === 3 ? t : 1;
+  }
+
+  /* Estilo y ancho efectivos de un pin concreto: el estilo global del mapa
+     modulado por el nivel de ese pin. */
+  function pinSpec(photo, baseStyle, baseWidth) {
+    const tier = tierOf(photo);
+    return {
+      tier,
+      style: tier === 3 ? 'dot' : baseStyle,
+      width: baseWidth * TIER_SCALE[tier]
+    };
+  }
+
+  function buildPinElement(photo, index, theme, baseStyle, scale, thumbUrl) {
     const el = document.createElement('div');
-    const w = PIN.baseWidth * scale;
+    const spec = pinSpec(photo, baseStyle, PIN.baseWidth * scale);
+    let style = spec.style;
+    const w = spec.width;
 
     // sin miniatura cargada no hay pin de foto posible: se cae a la gota
     if (style === 'photo' && !thumbUrl) style = 'teardrop';
-    el.className = 'pin pin-' + style;
+    el.className = 'pin pin-' + style + ' pin-tier' + spec.tier;
 
     if (style === 'photo') {
       const d = w * 1.55;
@@ -283,6 +323,7 @@
   window.MapView = {
     STYLE_URL, DEFAULT_STYLE, ATTRIB, PIN,
     create, applyTheme, ensureRouteLayers, setRoute, ensureTrackLayers, setTrack,
+    tierOf, pinSpec, TIER_SCALE,
     buildPinElement, pinAnchor, pinScale, classify
   };
 })();

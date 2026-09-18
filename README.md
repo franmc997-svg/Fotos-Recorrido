@@ -76,6 +76,19 @@ nombre o escribiendo las coordenadas.
 - **Aviso de pines superpuestos**: si a ese zoom hay pines dibujándose unos
   encima de otros, la app lo dice en vez de dejar que se descubra al descargar
   la imagen.
+- **Lista de todas las fotos**: además de las paradas se pueden listar las
+  fotos una a una y marcar cualquiera como pin, no solo la que eligió el
+  automático.
+- **Tres niveles de pin**: principal (grande), secundario (la mitad, sigue
+  enseñando la foto) y terciario (solo el punto). Un botón reparte los pines
+  entre los tres niveles según el peso de su parada, que es la forma rápida de
+  que un póster con muchos pines se lea.
+- **Líneas ajustables**: grosor, largo y separación de los guiones, opacidad y
+  halo de la ruta; grosor, opacidad y tamaño de punto de la traza.
+- **Textos ajustables**: alineación (izquierda, centro, derecha), altura del
+  bloque y tamaño de título y subtítulo. El tamaño se limita solo al ancho
+  disponible para que el título nunca salga cortado, y el control avisa
+  cuando ha llegado a ese tope.
 - **Varios mapas** en paralelo, con renombrar, duplicar y eliminar.
 - **Pines ligados a la foto**: cada pin es una foto concreta. Clic lo
   selecciona, doble clic abre la foto a pantalla completa, arrastrar lo mueve.

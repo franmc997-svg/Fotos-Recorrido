@@ -20,6 +20,7 @@
     fileRefs: new Map(), // índice del escaneo -> File, solo durante la sesión
     trips: [],
     groups: [],
+    groupLimit: 0,
     scan: null
   };
 
@@ -39,8 +40,20 @@
       pinSize: 1,
       groupRadiusM: 350,
       showTrack: true,
+      trackWidth: 1.2,
+      trackOpacity: 0.3,
+      trackDotSize: 1.3,
       showRoute: true,
       routeDashed: true,
+      routeWidth: 2.4,
+      routeDashLen: 4,
+      routeGapLen: 4,
+      routeOpacity: 1,
+      routeGlow: true,
+      titleScale: 1,
+      subScale: 1,
+      textY: 0,
+      textAlign: 'center',
       showLabels: false,
       showCoords: true,
       showFooter: true,
@@ -85,6 +98,7 @@
       id: p.id, mapId: p.mapId, name: p.name, caption: p.caption,
       lat: p.lat, lng: p.lng, fromExif: p.fromExif, takenAt: p.takenAt,
       order: p.order, kind: p.kind || null, scanIdx: p.scanIdx ?? null,
+      tier: p.tier || 1,
       width: p.width, height: p.height,
       display: p.display, thumb: p.thumb
     };
@@ -191,20 +205,29 @@
 
   function syncTrack() {
     if (!state.map || !state.map.getSource('fr-track')) return;
+    const s = state.mapDoc.settings;
     MapView.setTrack(state.map, state.mapDoc.track || [], {
-      show: state.mapDoc.settings.showTrack && (state.mapDoc.track || []).length > 1,
-      theme: theme()
+      show: s.showTrack && (state.mapDoc.track || []).length > 1,
+      theme: theme(),
+      width: s.trackWidth,
+      opacity: s.trackOpacity,
+      dotSize: s.trackDotSize
     });
   }
 
   function syncRoute() {
     if (!state.map || !state.map.getSource('fr-route')) return;
     const coords = ordered().map((p) => [p.lng, p.lat]);
+    const s = state.mapDoc.settings;
     MapView.setRoute(state.map, coords, {
-      show: state.mapDoc.settings.showRoute,
-      dashed: state.mapDoc.settings.routeDashed,
+      show: s.showRoute,
+      dashed: s.routeDashed,
       theme: theme(),
-      width: 2.4
+      width: s.routeWidth,
+      dashLen: s.routeDashLen,
+      gapLen: s.routeGapLen,
+      opacity: s.routeOpacity,
+      glow: s.routeGlow
     });
   }
 
@@ -620,6 +643,8 @@
     }
   }
 
+  function groupRowsVisible() { return state.groupLimit || MAX_GROUP_ROWS; }
+
   function renderGroups() {
     const section = $('groupSection');
     const photos = tripPhotos();
@@ -637,50 +662,87 @@
     state.groups = computeGroups();
     const pinned = pinnedKeySet();
     const onlyPinned = $('groupOnlyPinned').checked;
+    const mode = $('groupMode').value;
 
-    $('groupCount').textContent = state.groups.length;
+    $('groupCount').textContent = mode === 'photos'
+      ? fmtInt(photos.filter((r) => r.lat != null).length)
+      : state.groups.length;
     const located = photos.filter((r) => r.lat != null).length;
-    $('groupPhotoCount').textContent = `${fmtInt(located)} fotos con GPS`;
+    $('groupPhotoCount').textContent = mode === 'photos'
+      ? `${fmtInt(state.groups.length)} paradas`
+      : `${fmtInt(located)} fotos con GPS`;
 
     const ul = $('groupList');
     ul.innerHTML = '';
+    const limit = groupRowsVisible();
+    let shown = 0, hidden = 0, prev = null;
 
-    let shown = 0, prev = null;
-    for (const g of state.groups) {
-      const pins = groupPins(g, pinned);
-      const dist = prev ? Trips.haversine(prev.lat, prev.lng, g.lat, g.lng) * 1000 : 0;
-      prev = g;
-      if (onlyPinned && !pins.length) continue;
-      if (shown >= MAX_GROUP_ROWS) continue;
-      shown++;
-
+    const addRow = (opts) => {
       const li = document.createElement('li');
-      li.className = 'group-row' + (pins.length ? ' is-pinned' : '');
-
+      li.className = 'group-row' + (opts.pinned ? ' is-pinned' : '');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = pins.length > 0;
-      cb.title = pins.length ? 'Quitar el pin de esta parada' : 'Poner un pin en esta parada';
+      cb.checked = opts.pinned;
+      cb.title = opts.pinned ? 'Quitar el pin' : 'Poner un pin aquí';
       cb.addEventListener('click', (e) => e.stopPropagation());
-      cb.addEventListener('change', () => toggleGroupPin(g, cb.checked));
-
+      cb.addEventListener('change', () => opts.onToggle(cb.checked));
       const meta = document.createElement('div');
       meta.className = 'group-meta';
-      const bits = [`${fmtInt(g.count)} foto${g.count === 1 ? '' : 's'}`];
-      if (g.minutes >= 5) bits.push(`${g.minutes >= 90 ? (g.minutes / 60).toFixed(1) + ' h' : g.minutes + ' min'}`);
-      if (dist) bits.push(`a ${fmtDist(dist)} de la anterior`);
-      // Al subir la distancia de agrupación varios pines acaban dentro de la
-      // misma parada; sin decirlo, desmarcar una parecería borrar de más.
-      if (pins.length > 1) bits.push(`${pins.length} pines aquí`);
-      meta.innerHTML = `<div class="group-title">${escapeHtml(fmtClock(g.start))}</div>
-        <div class="group-sub">${escapeHtml(bits.join(' · '))}</div>`;
-
+      meta.innerHTML = `<div class="group-title">${escapeHtml(opts.title)}</div>
+        <div class="group-sub">${escapeHtml(opts.sub)}</div>`;
       li.appendChild(cb);
       li.appendChild(meta);
       li.addEventListener('click', () => {
-        if (state.map) state.map.easeTo({ center: [g.lng, g.lat], zoom: Math.max(state.map.getZoom(), 14) });
+        if (state.map) state.map.easeTo({ center: [opts.lng, opts.lat], zoom: Math.max(state.map.getZoom(), 14) });
       });
       ul.appendChild(li);
+    };
+
+    if (mode === 'photos') {
+      /* Todas las fotos del viaje, una por fila, para poder marcar a mano
+         cualquiera y no solo la representante que eligió el automático. */
+      const list = photos.filter((r) => r.lat != null && r.takenAt != null)
+        .sort((a, b) => a.takenAt - b.takenAt);
+      for (const r of list) {
+        const isPin = (r.idx != null && pinned.has('k:' + r.idx)) || (r.name && pinned.has('n:' + r.name));
+        const dist = prev ? Trips.haversine(prev.lat, prev.lng, r.lat, r.lng) * 1000 : 0;
+        prev = r;
+        if (onlyPinned && !isPin) continue;
+        if (shown >= limit) { hidden++; continue; }
+        shown++;
+        const bits = [];
+        if (dist) bits.push(`a ${fmtDist(dist)} de la anterior`);
+        if (isPin) {
+          const pin = findPinFor(r);
+          if (pin) bits.push(['principal', 'secundario', 'terciario'][(pin.tier || 1) - 1]);
+        }
+        addRow({
+          pinned: isPin, lat: r.lat, lng: r.lng,
+          title: `${fmtClock(r.takenAt)} · ${r.name || ''}`.slice(0, 48),
+          sub: bits.join(' · ') || 'sin pin',
+          onToggle: (on) => togglePhotoPin(r, on)
+        });
+      }
+    } else {
+      for (const g of state.groups) {
+        const pins = groupPins(g, pinned);
+        const dist = prev ? Trips.haversine(prev.lat, prev.lng, g.lat, g.lng) * 1000 : 0;
+        prev = g;
+        if (onlyPinned && !pins.length) continue;
+        if (shown >= limit) { hidden++; continue; }
+        shown++;
+        const bits = [`${fmtInt(g.count)} foto${g.count === 1 ? '' : 's'}`];
+        if (g.minutes >= 5) bits.push(`${g.minutes >= 90 ? (g.minutes / 60).toFixed(1) + ' h' : g.minutes + ' min'}`);
+        if (dist) bits.push(`a ${fmtDist(dist)} de la anterior`);
+        // Al subir la distancia de agrupación varios pines acaban dentro de la
+        // misma parada; sin decirlo, desmarcar una parecería borrar de más.
+        if (pins.length > 1) bits.push(`${pins.length} pines aquí`);
+        addRow({
+          pinned: pins.length > 0, lat: g.lat, lng: g.lng,
+          title: fmtClock(g.start), sub: bits.join(' · '),
+          onToggle: (on) => toggleGroupPin(g, on)
+        });
+      }
     }
 
     renderOverlapHint();
@@ -688,15 +750,68 @@
     if (!shown) {
       const li = document.createElement('li');
       li.className = 'empty tiny muted';
-      li.textContent = onlyPinned ? 'Ninguna parada tiene pin.' : 'Ninguna parada con estos ajustes.';
+      li.textContent = onlyPinned ? 'Nada con pin todavía.' : 'Nada que listar con estos ajustes.';
       ul.appendChild(li);
-    } else if (state.groups.length > MAX_GROUP_ROWS && !onlyPinned) {
+    } else if (hidden) {
       const li = document.createElement('li');
-      li.className = 'empty tiny muted';
-      li.textContent = `Se muestran las primeras ${MAX_GROUP_ROWS} de ${fmtInt(state.groups.length)}. `
-        + 'Sube la distancia de agrupación para tener menos paradas y más grandes.';
+      li.className = 'empty';
+      const btn = document.createElement('button');
+      btn.className = 'btn tiny ghost';
+      btn.textContent = `Mostrar ${Math.min(hidden, MAX_GROUP_ROWS)} más (quedan ${fmtInt(hidden)})`;
+      btn.addEventListener('click', () => {
+        state.groupLimit = limit + MAX_GROUP_ROWS;
+        renderGroups();
+      });
+      li.appendChild(btn);
       ul.appendChild(li);
     }
+  }
+
+  function findPinFor(rec) {
+    return state.photos.find((p) =>
+      (rec.idx != null && p.scanIdx === rec.idx) || (rec.name && p.name === rec.name));
+  }
+
+  async function togglePhotoPin(rec, on) {
+    if (on) {
+      const p = Photos.fromScan(rec, state.mapDoc.id);
+      p.order = state.photos.length;
+      state.photos.push(p);
+      await savePhoto(p);
+    } else {
+      const hit = findPinFor(rec);
+      if (hit) await deletePhotoById(hit.id);
+    }
+    renderLists();
+    syncMarkers();
+    syncRoute();
+    renderGroups();
+  }
+
+  /* Reparte los pines existentes en tres niveles según el peso de su parada:
+     los más importantes grandes, los del medio medianos y el resto solo como
+     punto. Es la forma rápida de que un póster con muchos pines se lea. */
+  async function autoTiers() {
+    if (!state.photos.length) { banner('No hay pines que escalonar.', 'info'); return; }
+    const pinned = pinnedKeySet();
+    const withWeight = state.groups
+      .filter((g) => groupPins(g, pinned).length)
+      .sort((a, b) => (b.count + b.minutes / 30) - (a.count + a.minutes / 30));
+
+    const n = withWeight.length || 1;
+    let changed = 0;
+    for (let i = 0; i < withWeight.length; i++) {
+      const tier = i < Math.ceil(n / 3) ? 1 : i < Math.ceil((2 * n) / 3) ? 2 : 3;
+      for (const r of groupPins(withWeight[i], pinned)) {
+        const pin = findPinFor(r);
+        if (pin && pin.tier !== tier) { pin.tier = tier; await savePhoto(pin); changed++; }
+      }
+    }
+    renderLists();
+    syncMarkers();
+    renderGroups();
+    banner(changed ? `${changed} pines escalonados en principal, secundario y terciario.`
+                   : 'Los niveles ya estaban repartidos.', 'ok');
   }
 
   /* Recupera la lista de fotos del viaje para un mapa antiguo: busca en la
@@ -880,15 +995,36 @@
     st.style.setProperty('--bg', t.bg);
     st.style.setProperty('--accent', t.accent);
 
-    const titleText = (s.title || '').toUpperCase();
-    $('ovTitle').textContent = titleText;
-    // el exportador encoge el título largo: la vista previa hace lo mismo
-    $('ovTitle').style.fontSize = Exporter.titleSizeCqw(titleText) + 'cqw';
+    // Mismo layout que usa el exportador, traducido a variables CSS: una sola
+    // fuente de verdad para que mover o agrandar un texto se vea igual aquí
+    // que en la imagen descargada.
+    const lay = Exporter.layoutFor(s, s.title, s.subtitle);
+    // Si el tamaño pedido no cabe, el control lo dice en vez de dejar que el
+    // usuario siga subiendo un deslizador que ya no hace nada.
+    const capNote = (id, capped) => {
+      const el = $(id);
+      if (el) el.textContent = el.textContent.replace(/ · al máximo$/, '') + (capped ? ' · al máximo' : '');
+    };
+    capNote('inTitleScaleVal', lay.titleCapped);
+    capNote('inSubScaleVal', lay.subCapped);
+    st.style.setProperty('--title-base', lay.titleBase);
+    st.style.setProperty('--title-size', lay.titleSize);
+    st.style.setProperty('--rule-y', lay.ruleY);
+    st.style.setProperty('--sub-base', lay.subBase);
+    st.style.setProperty('--sub-size', lay.subSize);
+    st.style.setProperty('--coords-base', lay.coordsBase);
+    st.style.setProperty('--legend-base', lay.legendBase);
+    st.style.setProperty('--text-align', lay.align);
+    st.style.setProperty('--text-pad', lay.pad + 'cqw');
+
+    const ov = $('overlay');
+    ov.classList.toggle('align-left', lay.align === 'left');
+    ov.classList.toggle('align-right', lay.align === 'right');
+
+    $('ovTitle').textContent = (s.title || '').toUpperCase();
     $('ovTitle').hidden = !s.title;
     $('ovRule').hidden = !s.title;
-    const subText = (s.subtitle || '').toUpperCase();
-    $('ovSubtitle').textContent = subText;
-    $('ovSubtitle').style.fontSize = Exporter.subtitleSizeCqw(subText, titleText) + 'cqw';
+    $('ovSubtitle').textContent = (s.subtitle || '').toUpperCase();
     $('ovSubtitle').hidden = !s.subtitle;
 
     const leg = $('ovLegend');
@@ -952,6 +1088,27 @@
       b.addEventListener('click', (e) => { e.stopPropagation(); select(p.id); setPlacing(p.id); $('unplacedHelp').hidden = false; });
       actions.appendChild(b);
     } else {
+      /* Botón que cicla el nivel en vez de un desplegable: en modo de orden
+         manual la fila ya lleva cinco controles y un select ocupaba tanto que
+         se comía el sitio donde se pulsa para seleccionar la foto. */
+      const tier = document.createElement('button');
+      tier.className = 'btn tiny ghost tier-btn';
+      const paint = () => {
+        tier.textContent = ['①', '②', '③'][(p.tier || 1) - 1];
+        tier.title = 'Nivel: ' + ['principal (grande)', 'secundario (mediano)', 'terciario (solo el punto)'][(p.tier || 1) - 1]
+          + ' — pulsa para cambiar';
+      };
+      paint();
+      tier.addEventListener('click', (e) => {
+        e.stopPropagation();
+        p.tier = ((p.tier || 1) % 3) + 1;
+        paint();
+        savePhoto(p);
+        syncMarkers();
+        renderGroups();
+      });
+      actions.appendChild(tier);
+
       const b = document.createElement('button');
       b.className = 'btn tiny ghost';
       b.textContent = 'Centrar';
@@ -1054,6 +1211,7 @@
     $('selEmpty').hidden = true;
     $('selThumb').src = thumbOrPlaceholder(p);
     $('selCaption').value = p.caption || '';
+    $('selTier').value = String(p.tier || 1);
     $('selLat').value = p.lat != null ? p.lat.toFixed(6) : '';
     $('selLng').value = p.lng != null ? p.lng.toFixed(6) : '';
     $('selDate').value = p.takenAt ? toLocalInput(p.takenAt) : '';
@@ -1244,6 +1402,20 @@
     $('orderMode').value = s.orderMode;
     $('groupRadius').value = radiusIndex(s.groupRadiusM || 350);
     $('groupRadiusVal').textContent = fmtDist(s.groupRadiusM || 350);
+
+    const setRange = (id, v) => { $(id).value = v; if ($(id + 'Val')) $(id + 'Val').textContent = v; };
+    setRange('inRouteWidth', s.routeWidth ?? 2.4);
+    setRange('inRouteDashLen', s.routeDashLen ?? 4);
+    setRange('inRouteGapLen', s.routeGapLen ?? 4);
+    setRange('inRouteOpacity', Math.round((s.routeOpacity ?? 1) * 100));
+    setRange('inTrackWidth', s.trackWidth ?? 1.2);
+    setRange('inTrackOpacity', Math.round((s.trackOpacity ?? 0.3) * 100));
+    setRange('inTrackDot', s.trackDotSize ?? 1.3);
+    setRange('inTextY', s.textY ?? 0);
+    setRange('inTitleScale', Math.round((s.titleScale ?? 1) * 100));
+    setRange('inSubScale', Math.round((s.subScale ?? 1) * 100));
+    $('inRouteGlow').checked = s.routeGlow !== false;
+    $('inTextAlign').value = s.textAlign || 'center';
     document.querySelectorAll('#themeGrid .swatch').forEach((b) => {
       b.classList.toggle('is-active', b.dataset.theme === s.theme);
     });
@@ -1479,6 +1651,53 @@
     $('tripMinHours').addEventListener('change', renderTrips);
     $('btnLoadThumbs').addEventListener('click', () => loadPixels(placed()));
 
+    /* Deslizador -> ajuste del mapa. scale convierte lo que ve el usuario
+       (por ejemplo 100 %) en lo que guarda el ajuste (1). */
+    const bindRange = (id, key, after, scale) => {
+      const el = $(id), out = $(id + 'Val');
+      const show = (v) => { if (out) out.textContent = v; };
+      el.addEventListener('input', (e) => {
+        show(e.target.value);
+        state.mapDoc.settings[key] = scale ? scale(Number(e.target.value)) : Number(e.target.value);
+        if (after) after();
+      });
+      el.addEventListener('change', saveMapSoon);
+    };
+    const pct = (v) => v / 100;
+
+    bindRange('inRouteWidth', 'routeWidth', syncRoute);
+    bindRange('inRouteDashLen', 'routeDashLen', syncRoute);
+    bindRange('inRouteGapLen', 'routeGapLen', syncRoute);
+    bindRange('inRouteOpacity', 'routeOpacity', syncRoute, pct);
+    bindRange('inTrackWidth', 'trackWidth', syncTrack);
+    bindRange('inTrackOpacity', 'trackOpacity', syncTrack, pct);
+    bindRange('inTrackDot', 'trackDotSize', syncTrack);
+    bindRange('inTextY', 'textY', updateOverlay);
+    bindRange('inTitleScale', 'titleScale', updateOverlay, pct);
+    bindRange('inSubScale', 'subScale', updateOverlay, pct);
+    // listener explícito: bindCheck se declara más abajo con const y usarlo
+    // aquí rompía todo el cableado posterior por zona muerta temporal
+    $('inRouteGlow').addEventListener('change', (e) => {
+      state.mapDoc.settings.routeGlow = e.target.checked;
+      syncRoute();
+      saveMapSoon();
+    });
+    $('inTextAlign').addEventListener('change', (e) => {
+      state.mapDoc.settings.textAlign = e.target.value;
+      updateOverlay();
+      saveMapSoon();
+    });
+
+    // nivel del pin seleccionado
+    $('selTier').addEventListener('change', (e) => {
+      const p = state.photos.find((x) => x.id === state.selectedId);
+      if (!p) return;
+      p.tier = Number(e.target.value) || 1;
+      savePhoto(p);
+      renderLists();
+      syncMarkers();
+    });
+
     // paradas
     $('groupRadius').addEventListener('input', (e) => {
       $('groupRadiusVal').textContent = fmtDist(GROUP_RADII[Number(e.target.value)]);
@@ -1491,6 +1710,8 @@
     $('groupOnlyPinned').addEventListener('change', renderGroups);
     $('btnPinTop').addEventListener('click', () => pinTopGroups(SUGGESTED_PINS));
     $('btnPinNone').addEventListener('click', unpinAll);
+    $('groupMode').addEventListener('change', renderGroups);
+    $('btnTierAuto').addEventListener('click', autoTiers);
     $('btnRebuildTrip').addEventListener('click', rebuildTripPhotos);
     $('heicMode').value = heicChoice() || '';
     $('heicMode').addEventListener('change', (e) => {
@@ -1744,7 +1965,16 @@
       return;
     }
     buildThemeGrid();
-    wire();
+    /* Si wire() revienta a mitad, los controles que quedan por debajo se
+       quedan sin listener y la app parece funcionar salvo que pulses justo
+       uno de ellos. Un fallo así estuvo escondido hasta que lo cazó una
+       prueba; mejor que se vea. */
+    try {
+      wire();
+    } catch (e) {
+      banner('Error al preparar los controles: ' + e.message + '. Parte de la interfaz no responderá.', 'warn', true);
+      throw e;
+    }
     const ok = await DB.ready();
     if (!ok) banner('El navegador no me deja usar almacenamiento local: trabajarás sin guardar. Exporta el proyecto antes de cerrar.', 'warn', true);
     try {

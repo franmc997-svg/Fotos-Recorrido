@@ -148,6 +148,18 @@ input,select{font:inherit}
 .field.row label b{color:var(--ui-text)}
 
 .thumb-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.tier-btn{padding:2px 5px;font-size:13px;line-height:1.1;min-width:22px}
+
+/* secciones plegables del panel de diseño */
+.fold{border-top:1px solid var(--ui-line);margin:10px 0 0;padding-top:8px}
+.fold>summary{
+  cursor:pointer;list-style:none;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ui-muted);padding:2px 0;user-select:none;
+}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary::before{content:'▸ ';color:var(--ui-accent)}
+.fold[open]>summary::before{content:'▾ '}
+.fold>*:not(summary){margin-top:8px}
 .thumb-row label{margin-left:auto}
 
 
@@ -241,9 +253,11 @@ label.check input{accent-color:var(--ui-accent)}
 .maplibregl-ctrl-group button+button{border-top:1px solid var(--ui-line)!important}
 .maplibregl-ctrl-group button span{filter:invert(1)}
 
-/* overlay del póster. Las posiciones están en cqw (1% del ancho del lienzo) y
-   son las mismas constantes que usa el exportador (Exporter.LAYOUT), para que
-   la vista previa y el PNG descargado sean el mismo diseño.
+/* overlay del póster. Las posiciones van en cqw (1% del ancho del lienzo) y
+   las calcula JS a partir de los ajustes del mapa, dejándolas aquí como
+   variables. El exportador usa exactamente los mismos números
+   (Exporter.layoutFor), así que la vista previa y el PNG descargado son el
+   mismo diseño aunque el usuario mueva y agrande los textos.
    Cada línea se ancla por su línea base: con line-height:1 la base queda a
    ~0.2em del borde inferior de la caja, y ese 0.2em se descuenta aquí. */
 .overlay{position:absolute;inset:0;pointer-events:none}
@@ -254,26 +268,34 @@ label.check input{accent-color:var(--ui-accent)}
 .overlay>*{position:absolute;left:0;right:0}
 .ov-title,.ov-subtitle{font-family:"Helvetica Neue",Helvetica,Arial,system-ui,sans-serif}
 .ov-title{
-  bottom:calc(18.4cqw - 0.2em);
-  font-weight:300;font-size:6.9cqw;line-height:1;letter-spacing:.22em;text-indent:.22em;
-  color:var(--title,#22e2f5);text-align:center;white-space:nowrap;
+  bottom:calc(var(--title-base,18.4) * 1cqw - 0.2em);
+  font-weight:300;font-size:calc(var(--title-size,6.9) * 1cqw);
+  line-height:1;letter-spacing:.22em;text-indent:.22em;
+  color:var(--title,#22e2f5);white-space:nowrap;
+  text-align:var(--text-align,center);padding:0 var(--text-pad,0);
 }
 .ov-rule{
-  bottom:14.6cqw;width:17.6cqw;left:50%;right:auto;transform:translateX(-50%);
+  bottom:calc(var(--rule-y,14.6) * 1cqw);width:17.6cqw;
+  left:50%;right:auto;transform:translateX(-50%);
   height:max(1px,0.13cqw);background:var(--title,#22e2f5);opacity:.55;
 }
+.overlay.align-left .ov-rule{left:var(--text-pad,5.2cqw);transform:none}
+.overlay.align-right .ov-rule{left:auto;right:var(--text-pad,5.2cqw);transform:none}
 .ov-subtitle{
-  bottom:calc(11.4cqw - 0.2em);
-  font-size:2.5cqw;line-height:1;letter-spacing:.14em;text-indent:.14em;white-space:nowrap;
-  color:var(--sub,#b9a8dd);text-align:center;
+  bottom:calc(var(--sub-base,11.4) * 1cqw - 0.2em);
+  font-size:calc(var(--sub-size,2.5) * 1cqw);
+  line-height:1;letter-spacing:.14em;text-indent:.14em;white-space:nowrap;
+  color:var(--sub,#b9a8dd);
+  text-align:var(--text-align,center);padding:0 var(--text-pad,0);
 }
 .ov-coords{
-  bottom:calc(7.4cqw - 0.2em);
-  font-size:1.6cqw;line-height:1;color:var(--dim,#6d5f95);text-align:center;
+  bottom:calc(var(--coords-base,7.4) * 1cqw - 0.2em);
+  font-size:1.6cqw;line-height:1;color:var(--dim,#6d5f95);
   font-family:ui-monospace,Menlo,Consolas,monospace;
+  text-align:var(--text-align,center);padding:0 var(--text-pad,0);
 }
 .ov-legend{
-  bottom:calc(27.5cqw - 0.2em);left:5.2cqw;right:5.2cqw;text-align:left;
+  bottom:calc(var(--legend-base,27.5) * 1cqw - 0.2em);left:5.2cqw;right:5.2cqw;text-align:left;
   font-size:1.7cqw;line-height:calc(2.6 / 1.7);
   font-family:ui-monospace,Menlo,Consolas,monospace;color:var(--sub,#b9a8dd);
 }
