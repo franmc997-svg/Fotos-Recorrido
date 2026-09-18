@@ -3,10 +3,10 @@
    algunos navegadores), caemos a un store en memoria y avisamos al usuario. */
 (function () {
   const NAME = 'fotos-recorrido';
-  const VERSION = 1;
+  const VERSION = 2;
   let db = null;
   let memoryMode = false;
-  const mem = { maps: new Map(), photos: new Map() };
+  const mem = { maps: new Map(), photos: new Map(), library: null };
 
   function open() {
     if (db) return Promise.resolve(db);
@@ -23,6 +23,10 @@
         const d = req.result;
         if (!d.objectStoreNames.contains('maps')) {
           d.createObjectStore('maps', { keyPath: 'id' });
+        }
+        if (!d.objectStoreNames.contains('library')) {
+          // el escaneo del carrete: miles de registros diminutos, sin píxeles
+          d.createObjectStore('library', { keyPath: 'id' });
         }
         if (!d.objectStoreNames.contains('photos')) {
           const s = d.createObjectStore('photos', { keyPath: 'id' });
@@ -107,6 +111,19 @@
       const s = await tx('photos', 'readwrite');
       if (!s) { mem.photos.delete(id); return; }
       await wrap(s.delete(id));
+    },
+
+    async putLibrary(doc) {
+      const s = await tx('library', 'readwrite');
+      if (!s) { mem.library = doc; return doc; }
+      await wrap(s.put(doc));
+      return doc;
+    },
+
+    async getLibrary(id) {
+      const s = await tx('library', 'readonly');
+      if (!s) return mem.library && mem.library.id === id ? mem.library : null;
+      return (await wrap(s.get(id))) || null;
     },
 
     async estimate() {

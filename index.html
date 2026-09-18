@@ -35,40 +35,86 @@
 
   <!-- ============ PANEL IZQUIERDO: FOTOS ============ -->
   <aside class="panel panel-left">
-    <div class="panel-head">
-      <h2>Fotos</h2>
-      <span id="photoCount" class="count">0</span>
+    <div class="tabs">
+      <button class="tab is-active" data-tab="lib">Biblioteca</button>
+      <button class="tab" data-tab="map">Mapa actual <span id="photoCount" class="count">0</span></button>
     </div>
 
-    <div id="dropzone" class="dropzone">
-      <input type="file" id="fileInput" accept="image/*" multiple hidden>
-      <p><strong>Arrastra tus fotos aquí</strong></p>
-      <p class="muted">o <button id="btnPick" class="linklike">selecciónalas</button></p>
-      <p class="tiny muted">Leo la ubicación del EXIF. Las que no la tengan quedan en «Sin ubicar».</p>
-    </div>
-
-    <div id="ingestProgress" class="progress" hidden><div class="bar"></div><span></span></div>
-
-    <div class="section">
-      <div class="section-head">
-        <h3>Sin ubicar <span id="unplacedCount" class="pill warn">0</span></h3>
-      </div>
-      <p class="tiny muted" id="unplacedHelp" hidden>
-        Selecciona una y pulsa <em>Colocar</em>, luego haz clic en el mapa. O búscala por nombre de lugar.
+    <!-- ---- biblioteca: escanear el carrete y detectar viajes ---- -->
+    <section id="tabLib" class="tabpane">
+      <p class="tiny muted">
+        Del carrete solo leo la ubicación y la fecha del EXIF: no decodifico ni
+        copio las fotos. Miles tardan un par de minutos. Los HEIC del iPhone
+        valen tal cual.
       </p>
-      <ul id="unplacedList" class="photolist"></ul>
-    </div>
-
-    <div class="section">
-      <div class="section-head">
-        <h3>En el mapa <span id="placedCount" class="pill">0</span></h3>
-        <select id="orderMode" class="mini" title="Orden del recorrido">
-          <option value="date">Orden: fecha</option>
-          <option value="manual">Orden: manual</option>
-        </select>
+      <div class="btn-row">
+        <button id="btnScanFiles" class="btn primary">Escanear fotos…</button>
+        <button id="btnScanFolder" class="btn ghost">Carpeta…</button>
       </div>
-      <ul id="placedList" class="photolist"></ul>
-    </div>
+      <input type="file" id="scanInput" accept="image/*,.heic,.heif,.HEIC,.HEIF" multiple hidden>
+      <input type="file" id="scanFolderInput" webkitdirectory directory multiple hidden>
+
+      <div id="scanProgress" class="progress" hidden><div class="bar"></div><span></span></div>
+      <div id="scanCancelRow" class="btn-row" hidden>
+        <button id="btnScanCancel" class="btn ghost danger tiny">Cancelar escaneo</button>
+      </div>
+      <div id="scanSummary" class="summary tiny" hidden></div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Viajes <span id="tripCount" class="pill">0</span></h3>
+        </div>
+        <label class="check tiny"><input type="checkbox" id="tripIgnoreHome">
+          No descartar las fotos de casa</label>
+        <div class="field row">
+          <label for="tripGap">Separar viajes con más de <b id="tripGapVal">36</b> h sin fotos</label>
+          <input id="tripGap" type="range" min="12" max="96" step="6" value="36">
+        </div>
+        <ul id="tripList" class="triplist"></ul>
+      </div>
+    </section>
+
+    <!-- ---- mapa actual: pines y fotos sueltas ---- -->
+    <section id="tabMap" class="tabpane" hidden>
+      <div id="dropzone" class="dropzone">
+        <input type="file" id="fileInput" accept="image/*,.heic,.heif,.HEIC,.HEIF" multiple hidden>
+        <p><strong>Arrastra fotos sueltas aquí</strong></p>
+        <p class="muted">o <button id="btnPick" class="linklike">selecciónalas</button></p>
+        <p class="tiny muted">Para el carrete entero usa la pestaña Biblioteca.</p>
+      </div>
+
+      <div id="ingestProgress" class="progress" hidden><div class="bar"></div><span></span></div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Sin ubicar <span id="unplacedCount" class="pill warn">0</span></h3>
+        </div>
+        <p class="tiny muted" id="unplacedHelp" hidden>
+          Selecciona una y pulsa <em>Colocar</em>, luego haz clic en el mapa. O búscala por nombre de lugar.
+        </p>
+        <ul id="unplacedList" class="photolist"></ul>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>En el mapa <span id="placedCount" class="pill">0</span></h3>
+          <select id="orderMode" class="mini" title="Orden del recorrido">
+            <option value="date">Orden: fecha</option>
+            <option value="manual">Orden: manual</option>
+          </select>
+        </div>
+        <div id="thumbRow" class="thumb-row" hidden>
+          <button id="btnLoadThumbs" class="btn tiny ghost">Cargar imágenes de los pines</button>
+          <label class="tiny muted" for="heicMode">HEIC</label>
+          <select id="heicMode" class="mini" title="Qué hacer con las fotos HEIC del iPhone">
+            <option value="">Preguntar</option>
+            <option value="on">Decodificar siempre</option>
+            <option value="off">Nunca (solo GPS)</option>
+          </select>
+        </div>
+        <ul id="placedList" class="photolist"></ul>
+      </div>
+    </section>
   </aside>
 
   <!-- ============ LIENZO ============ -->
@@ -148,6 +194,7 @@
     </div>
 
     <div class="field">
+      <label class="check"><input type="checkbox" id="inTrack" checked> Dibujar la traza completa del viaje</label>
       <label class="check"><input type="checkbox" id="inRoute" checked> Dibujar la ruta entre fotos</label>
       <label class="check"><input type="checkbox" id="inRouteDashed" checked> Ruta punteada</label>
       <label class="check"><input type="checkbox" id="inLabels"> Mostrar nombres de calles y lugares</label>
@@ -173,6 +220,7 @@
         <input id="selDate" type="datetime-local">
       </div>
       <div class="btn-row">
+        <button id="selLoadImg" class="btn ghost" hidden>Cargar imagen</button>
         <button id="selCenter" class="btn ghost">Centrar</button>
         <button id="selPlace" class="btn ghost">Colocar</button>
         <button id="selDelete" class="btn ghost danger">Eliminar</button>
@@ -217,6 +265,27 @@
   </form>
 </dialog>
 
+<dialog id="heicDlg" class="dlg">
+  <form method="dialog">
+    <h2>Imágenes HEIC</h2>
+    <p class="tiny">
+      Ninguna versión de ningún navegador abre HEIC por su cuenta. Para ver las
+      fotos del iPhone dentro de la app hay que cargar un decodificador de
+      ~960&nbsp;KB, y cada foto tarda entre 1 y 2 segundos en decodificarse.
+    </p>
+    <p class="tiny muted">
+      Sin él el mapa, la ruta y los pines funcionan igual; lo único que no
+      verás son las miniaturas ni los pines con foto.
+    </p>
+    <label class="check"><input type="checkbox" id="heicRemember">
+      Recordar esta elección (se puede cambiar luego junto al botón de imágenes)</label>
+    <div class="btn-row end">
+      <button value="cancel" class="btn ghost">Seguir sin imágenes</button>
+      <button value="ok" class="btn primary">Cargar decodificador</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Generando…</span></div>
 
 <input type="file" id="importInput" accept="application/json,.json" hidden>
@@ -224,7 +293,10 @@
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/exifr.umd.js"></script>
 <script src="js/themes.js"></script>
+<script src="js/heic.js"></script>
 <script src="js/db.js"></script>
+<script src="js/scan.js"></script>
+<script src="js/trips.js"></script>
 <script src="js/photos.js"></script>
 <script src="js/geocode.js"></script>
 <script src="js/mapview.js"></script>

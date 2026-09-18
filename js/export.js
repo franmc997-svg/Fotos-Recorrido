@@ -59,6 +59,8 @@
 
   function drawPinCanvas(ctx, x, y, w, theme, style, index, img) {
     const P = MapView.PIN;
+    // igual que en el editor: sin imagen cargada, el pin de foto es una gota
+    if (style === 'photo' && !img) style = 'teardrop';
     if (style === 'photo') {
       const d = w * 1.55;
       const cy = y - w * 0.34 - d / 2;
@@ -279,6 +281,11 @@
 
       await new Promise((res) => map.once('load', res));
       MapView.applyTheme(map, theme, !!opts.settings.showLabels);
+      MapView.ensureTrackLayers(map, theme);
+      MapView.setTrack(map, opts.trackCoords || [], {
+        show: !!opts.settings.showTrack && (opts.trackCoords || []).length > 1,
+        theme
+      });
       MapView.ensureRouteLayers(map, theme);
       MapView.setRoute(map, opts.routeCoords, {
         show: !!opts.settings.showRoute,

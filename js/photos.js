@@ -1,50 +1,39 @@
-/* Ingesta de fotos: EXIF (GPS + fecha), reencodeado a tamaño razonable y
-   miniatura. Guardar los originales llena la cuota del navegador en un viaje
-   real (200 fotos × 4 MB), así que guardamos una versión de pantalla. */
+/* Píxeles de las fotos: decodificar, reescalar y hacer miniatura.
+
+   Esto es lo caro (de 0,3 s por JPEG a 2 s por HEIC), así que solo se ejecuta
+   sobre las fotos que el usuario convierte en pin, nunca sobre la biblioteca
+   entera. Guardar los originales tampoco es opción: 3000 fotos de iPhone son
+   más de 10 GB y la cuota del navegador no da. */
 (function () {
-  const DISPLAY_MAX = 1600;   // lado mayor de la versión que se muestra
-  const THUMB_MAX = 240;      // lado mayor de la miniatura (lista y pines)
-  const HEIC = /(\.heic|\.heif)$/i;
+  const DISPLAY_MAX = 1600;
+  const THUMB_MAX = 240;
 
   function uid() {
     return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
-  async function readExif(file) {
-    const out = { lat: null, lng: null, takenAt: null };
-    if (!window.exifr) return out;
-    try {
-      const gps = await exifr.gps(file);
-      if (gps && Number.isFinite(gps.latitude) && Number.isFinite(gps.longitude)) {
-        out.lat = gps.latitude;
-        out.lng = gps.longitude;
-      }
-    } catch (e) { /* sin GPS legible */ }
-    try {
-      const meta = await exifr.parse(file, ['DateTimeOriginal', 'CreateDate', 'ModifyDate']);
-      const d = meta && (meta.DateTimeOriginal || meta.CreateDate || meta.ModifyDate);
-      if (d instanceof Date && !isNaN(d)) out.takenAt = d.getTime();
-    } catch (e) { /* sin fecha EXIF */ }
-    if (!out.takenAt && file.lastModified) out.takenAt = file.lastModified;
-    return out;
+  function isHeic(file) {
+    return Scan.kindOf(file) === 'heic';
   }
 
+  /* Fuente dibujable en un canvas. Los HEIC pasan por libheif (wasm), que se
+     descarga la primera vez que hace falta. */
   async function decode(file) {
-    // from-image aplica la rotación EXIF; si no, las verticales salen tumbadas.
+    if (isHeic(file)) return await Heic.decodeToCanvas(file);
     if (window.createImageBitmap) {
       try {
+        // from-image aplica la rotación EXIF; si no, las verticales salen tumbadas
         return await createImageBitmap(file, { imageOrientation: 'from-image' });
-      } catch (e) { /* fallback abajo */ }
+      } catch (e) { /* abajo el plan B */ }
     }
     const url = URL.createObjectURL(file);
     try {
-      const img = await new Promise((res, rej) => {
+      return await new Promise((res, rej) => {
         const i = new Image();
         i.onload = () => res(i);
         i.onerror = () => rej(new Error('decode'));
         i.src = url;
       });
-      return img;
     } finally {
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
@@ -65,40 +54,47 @@
     });
   }
 
-  /* Devuelve el registro de foto listo para guardar, o {error} si no se pudo. */
-  async function ingest(file, mapId) {
-    if (HEIC.test(file.name) || file.type === 'image/heic' || file.type === 'image/heif') {
-      // El EXIF sí se puede leer; la imagen no la decodifica ningún navegador.
-      const ex = await readExif(file);
-      return { error: 'HEIC', name: file.name, exif: ex };
-    }
-    const ex = await readExif(file);
-    let bmp;
-    try {
-      bmp = await decode(file);
-    } catch (e) {
-      return { error: 'DECODE', name: file.name };
-    }
-    const display = await resizeToBlob(bmp, DISPLAY_MAX, 0.85);
-    const thumb = await resizeToBlob(bmp, THUMB_MAX, 0.8);
-    if (bmp.close) bmp.close();
+  /* Añade display + thumb a un registro de foto que ya existe. */
+  async function attachPixels(rec, file) {
+    const src = await decode(file);
+    const display = await resizeToBlob(src, DISPLAY_MAX, 0.85);
+    const thumb = await resizeToBlob(src, THUMB_MAX, 0.8);
+    if (src.close) src.close();
+    rec.display = display.blob;
+    rec.thumb = thumb.blob;
+    rec.width = display.w;
+    rec.height = display.h;
+    return rec;
+  }
 
+  /* Registro de pin a partir de un registro de escaneo (sin píxeles). */
+  function fromScan(rec, mapId) {
     return {
-      id: uid(),
-      mapId,
-      name: file.name,
-      caption: '',
-      lat: ex.lat,
-      lng: ex.lng,
-      fromExif: ex.lat != null,
-      takenAt: ex.takenAt || null,
-      order: null,
-      width: display.w,
-      height: display.h,
-      display: display.blob,
-      thumb: thumb.blob
+      id: uid(), mapId,
+      name: rec.name, caption: '',
+      lat: rec.lat ?? null, lng: rec.lng ?? null,
+      fromExif: rec.lat != null,
+      takenAt: rec.takenAt ?? null,
+      order: null, kind: rec.kind || 'jpeg',
+      scanIdx: rec.idx ?? null,
+      width: null, height: null,
+      display: null, thumb: null
     };
   }
 
-  window.Photos = { ingest, uid, readExif };
+  /* Ruta directa para quien arrastra unas pocas fotos: lee EXIF y decodifica
+     de una vez. */
+  async function ingest(file, mapId, opts) {
+    const scanned = await Scan.readOne(file);
+    const rec = fromScan(scanned, mapId);
+    if (opts && opts.pixels === false) return rec;
+    try {
+      await attachPixels(rec, file);
+    } catch (e) {
+      rec.pixelError = isHeic(file) ? 'HEIC' : 'DECODE';
+    }
+    return rec;
+  }
+
+  window.Photos = { ingest, uid, decode, attachPixels, fromScan, isHeic, DISPLAY_MAX, THUMB_MAX };
 })();

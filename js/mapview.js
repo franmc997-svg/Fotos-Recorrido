@@ -139,6 +139,59 @@
     }
   }
 
+  /* Traza completa del viaje: miles de puntos se dibujan como una capa GL,
+     no como marcadores. Un marcador DOM por foto mata el mapa a partir de unos
+     pocos cientos. */
+  function ensureTrackLayers(map, theme) {
+    if (!map.getSource('fr-track')) {
+      map.addSource('fr-track', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('fr-track-line')) {
+      map.addLayer({
+        id: 'fr-track-line',
+        type: 'line',
+        source: 'fr-track',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': theme.accent, 'line-width': 1.2, 'line-opacity': 0.3 }
+      });
+    }
+    if (!map.getSource('fr-track-points')) {
+      map.addSource('fr-track-points', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    }
+    if (!map.getLayer('fr-track-dots')) {
+      map.addLayer({
+        id: 'fr-track-dots',
+        type: 'circle',
+        source: 'fr-track-points',
+        paint: { 'circle-color': theme.accent, 'circle-radius': 1.3, 'circle-opacity': 0.38 }
+      });
+    }
+  }
+
+  function setTrack(map, coords, opts) {
+    if (!map.getSource('fr-track')) return;
+    const line = coords.length > 1
+      ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }] }
+      : { type: 'FeatureCollection', features: [] };
+    map.getSource('fr-track').setData(line);
+    if (map.getSource('fr-track-points')) {
+      map.getSource('fr-track-points').setData({
+        type: 'FeatureCollection',
+        features: coords.map((c) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: {} }))
+      });
+    }
+    const vis = opts.show ? 'visible' : 'none';
+    ['fr-track-line', 'fr-track-dots'].forEach((id) => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', vis);
+      }
+    });
+    // La traza va por debajo de la ruta y en un tono apagado: si compite con
+    // la línea que une los pines, el póster se vuelve ilegible.
+    if (map.getLayer('fr-track-line')) map.setPaintProperty('fr-track-line', 'line-color', opts.theme.accent);
+    if (map.getLayer('fr-track-dots')) map.setPaintProperty('fr-track-dots', 'circle-color', opts.theme.accent);
+  }
+
   function setRoute(map, coords, opts) {
     if (!map.getSource('fr-route')) return;
     const data = coords.length > 1
@@ -186,8 +239,11 @@
 
   function buildPinElement(photo, index, theme, style, scale, thumbUrl) {
     const el = document.createElement('div');
-    el.className = 'pin pin-' + style;
     const w = PIN.baseWidth * scale;
+
+    // sin miniatura cargada no hay pin de foto posible: se cae a la gota
+    if (style === 'photo' && !thumbUrl) style = 'teardrop';
+    el.className = 'pin pin-' + style;
 
     if (style === 'photo') {
       const d = w * 1.55;
@@ -226,7 +282,7 @@
 
   window.MapView = {
     STYLE_URL, DEFAULT_STYLE, ATTRIB, PIN,
-    create, applyTheme, ensureRouteLayers, setRoute,
+    create, applyTheme, ensureRouteLayers, setRoute, ensureTrackLayers, setTrack,
     buildPinElement, pinAnchor, pinScale, classify
   };
 })();
