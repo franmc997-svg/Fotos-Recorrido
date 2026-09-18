@@ -168,12 +168,34 @@
     rebuild();
   }
 
+  const outliers = (list) => Layout.outliers(list, Trips.haversine);
+
+  function renderOutlierHint() {
+    const el = $('farHint');
+    const btn = $('btnDropFar');
+    if (!el) return;
+    const far = outliers(activeStops());
+    el.hidden = btn.hidden = !far.length;
+    if (!far.length) return;
+    const med = (arr) => { const s2 = arr.slice().sort((x, y) => x - y); return s2[Math.floor(s2.length / 2)]; };
+    const cLat = med(activeStops().map((g) => g.lat));
+    const cLng = med(activeStops().map((g) => g.lng));
+    const lejos = Math.max(...far.map((g) => Trips.haversine(cLat, cLng, g.lat, g.lng)));
+    el.textContent = far.length === 1
+      ? `Un lugar está a ${Trips.fmtKm(lejos)} del resto y abre el mapa hasta ahí: `
+        + 'por eso sale tanto papel vacío.'
+      : `${far.length} lugares están hasta a ${Trips.fmtKm(lejos)} del resto y abren `
+        + 'el mapa hasta ahí: por eso sale tanto papel vacío.';
+    btn.textContent = far.length === 1 ? 'Dejar fuera ese lugar' : `Dejar fuera esos ${far.length}`;
+  }
+
   function activeStops() {
     return state.stops.filter((g) => !state.off.has(g.id));
   }
 
   function renderPieceList() {
     $('pieceCount').textContent = String(activeStops().length);
+    renderOutlierHint();
     const ul = $('pieceList');
     ul.innerHTML = '';
     state.stops.forEach((g, i) => {
@@ -275,10 +297,14 @@
       ? state.trip.photos.filter((r) => r.lat != null).sort((a, b) => (a.takenAt || 0) - (b.takenAt || 0))
       : [];
 
-    // El encuadre se calcula con todo lo que se va a dibujar, traza incluida:
-    // si solo se usaran las piezas, la traza se saldría del papel.
-    const all = trackPts.map((r) => [r.lng, r.lat])
-      .concat(stops.map((g) => [g.lng, g.lat]));
+    /* El encuadre lo mandan las piezas elegidas, no todas las fotos del viaje.
+       Antes mandaban todas, y eso hacía que desmarcar una foto lejana no
+       sirviera de nada: seguía estirando el papel desde fuera. Con un viaje a
+       Londres y una sola foto tomada en casa, el póster salía con el ochenta
+       por ciento de océano y el collage aplastado en una esquina, sin forma de
+       arreglarlo desde la interfaz. La traza sigue dibujándose entera; lo que
+       se salga del encuadre se sale, que es lo que se espera al elegir. */
+    const all = stops.map((g) => [g.lng, g.lat]);
     /* El margen se calcula a partir del tamaño de pieza: las piezas se
        dibujan centradas en su punto, así que la mitad de la pieza sobresale
        del encuadre de los puntos y hay que reservarle sitio, ni más ni menos.
@@ -346,7 +372,22 @@
 
   function metaLine() {
     if (!state.trip) return '';
-    const photos = state.trip.photos.filter((r) => r.lat != null && r.takenAt != null);
+    /* La distancia describe lo que enseña el póster, no el viaje entero.
+       Si alguien deja fuera la foto de vuelta a casa, el collage pasa a ser
+       solo Londres; poner ahí los 1420 km que incluyen el vuelo sería una
+       mentira pequeña pero impresa. Se cuentan las fotos que caen dentro de
+       la zona encuadrada, con holgura para no recortar por un metro. */
+    const stops = activeStops();
+    let photos = state.trip.photos.filter((r) => r.lat != null && r.takenAt != null);
+    if (stops.length) {
+      const la = stops.map((g) => g.lat), ln = stops.map((g) => g.lng);
+      const padLa = Math.max(0.02, (Math.max(...la) - Math.min(...la)) * 0.25);
+      const padLn = Math.max(0.02, (Math.max(...ln) - Math.min(...ln)) * 0.25);
+      const dentro = photos.filter((r) =>
+        r.lat >= Math.min(...la) - padLa && r.lat <= Math.max(...la) + padLa &&
+        r.lng >= Math.min(...ln) - padLn && r.lng <= Math.max(...ln) + padLn);
+      if (dentro.length > 1) photos = dentro;
+    }
     const st = photos.length > 1 ? Trips.travelStats(photos) : null;
     const partes = [Trips.label(state.trip)];
     if (st && st.totalKm > 0) partes.push(Trips.fmtKm(st.totalKm));
@@ -375,7 +416,7 @@
     if (baseCache.key === key || baseCache.pending === key) return;
     baseCache.pending = key;
     $('mapHint').textContent = 'Trayendo el mapa…';
-    Basemap.capture({ W, H, center: cam.center, zoom: cam.zoom, ink: inkOf(), labels: s.mapLabels })
+    Basemap.capture({ W, H, fit: proj, ink: inkOf(), labels: s.mapLabels })
       .then((cv) => {
         if (baseCache.pending !== key) return;   // llegó tarde: ya hay otra petición
         baseCache.key = key;
@@ -452,8 +493,7 @@
       let base = null;
       if (s.mapStrength && Basemap.available) {
         busy(true, 'Trayendo el mapa a resolución final…');
-        const cam = buildModel(w, h, null).proj.camera(w, h);
-        base = await Basemap.capture({ W: w, H: h, center: cam.center, zoom: cam.zoom,
+        base = await Basemap.capture({ W: w, H: h, fit: buildModel(w, h, null).proj,
           ink: inkOf(), labels: s.mapLabels });
         busy(true, `Generando ${w} × ${h}…`);
       }
@@ -741,6 +781,12 @@
       if ($('exportDlg').returnValue === 'ok') exportImage();
     });
 
+    $('btnDropFar').onclick = () => {
+      for (const g of outliers(activeStops())) state.off.add(g.id);
+      renderPieceList();
+      rebuild();
+      markDirty();
+    };
     $('btnSave').onclick = saveProject;
     $('btnLoad').onclick = showProjects;
     $('btnReset').onclick = () => {

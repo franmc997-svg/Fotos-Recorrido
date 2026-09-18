@@ -178,5 +178,34 @@
     };
   }
 
-  return { build, relax, strain, rng, hashId, DEFAULTS };
+  /* Paradas muy lejos del resto.
+
+     Una foto suelta a mil kilómetros no es un fallo del programa, pero arruina
+     el póster: el encuadre se abre hasta ella y el collage queda aplastado en
+     una esquina con el resto del papel vacío. Conviene decirlo, porque desde
+     el póster no se adivina la causa.
+
+     Se usa la mediana y no la media porque este es justo el caso en que la
+     media miente: un valor extremo la arrastra y entonces ya nada parece
+     extremo. Las tres condiciones son necesarias —muy por encima de lo
+     habitual, lejos en términos absolutos, y en minoría— para no llamar
+     anómalo a un viaje que de verdad recorre medio país.
+
+     dist(aLat, aLng, bLat, bLng) -> km */
+  function outliers(list, dist, opts) {
+    const o = Object.assign({ factor: 6, floorKm: 50, maxShare: 0.35, minList: 4 }, opts);
+    if (!list || list.length < o.minList) return [];
+    const mid = (arr) => {
+      const s2 = arr.slice().sort((x, y) => x - y);
+      return s2[Math.floor(s2.length / 2)];
+    };
+    const cLat = mid(list.map((g) => g.lat));
+    const cLng = mid(list.map((g) => g.lng));
+    const d = list.map((g) => dist(cLat, cLng, g.lat, g.lng));
+    const limit = Math.max(mid(d) * o.factor, o.floorKm);
+    const far = list.filter((g, i) => d[i] > limit);
+    return far.length && far.length <= list.length * o.maxShare ? far : [];
+  }
+
+  return { build, relax, strain, outliers, rng, hashId, DEFAULTS };
 }));

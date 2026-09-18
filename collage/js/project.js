@@ -85,5 +85,36 @@
     return { project, invert, camera, pxPerKm, k, cx, cy, center: [centerX, centerY] };
   }
 
-  return { merc, unmerc, fit };
+  /* Cámara para una captura que se pinta en un contenedor reducido y luego se
+     amplía por su pixelRatio, que es como se saca un mapa a resolución de
+     póster. El zoom de MapLibre cuenta 512·2^z píxeles CSS por mundo; si el
+     contenedor mide ratio veces menos, el zoom tiene que bajar log2(ratio) o
+     el mapa sale a esa misma escala de más.
+
+     Esto vivía metido en la función de captura y estaba mal por ese factor: el
+     mapa salía al doble, o sea enseñando la mitad central del área. Con un
+     collage de Londres y una foto suelta en España, el centro cae en el golfo
+     de Vizcaya y el póster mostraba Francia. Aquí está aparte para poder
+     comprobarlo sin navegador, que es lo que faltaba. */
+  function captureCamera(fit, W, H, ratio) {
+    const r = ratio || 1;
+    const cam = fit.camera(W, H);
+    return {
+      center: cam.center,
+      zoom: cam.zoom - Math.log2(r),
+      cssW: Math.round(W / r),
+      cssH: Math.round(H / r)
+    };
+  }
+
+  /* Dónde cae un punto en el póster según la fórmula del MAPA, no la mía.
+     Que las dos coincidan es justamente lo que hay que comprobar. */
+  function posterPoint(cam, lng, lat, W, H, ratio) {
+    const [x, y] = merc(lng, lat);
+    const [cx, cy] = merc(cam.center[0], cam.center[1]);
+    const world = 512 * Math.pow(2, cam.zoom) * (ratio || 1);
+    return [W / 2 + (x - cx) * world, H / 2 + (y - cy) * world];
+  }
+
+  return { merc, unmerc, fit, captureCamera, posterPoint };
 }));

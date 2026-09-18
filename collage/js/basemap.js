@@ -67,8 +67,9 @@
     try { return await job; } finally { pending = null; }
   }
 
-  async function doCapture({ W, H, center, zoom, ink, labels }) {
-    const cssW = Math.round(W / RATIO), cssH = Math.round(H / RATIO);
+  async function doCapture({ W, H, fit, ink, labels }) {
+    const cam = Project.captureCamera(fit, W, H, RATIO);
+    const { center, zoom, cssW, cssH } = cam;
     const host = document.createElement('div');
     host.style.cssText = `position:absolute;left:-20000px;top:0;width:${cssW}px;height:${cssH}px;`;
     document.body.appendChild(host);

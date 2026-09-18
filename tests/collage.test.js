@@ -54,6 +54,30 @@ console.log('\nProyección');
     Math.abs(centro[0] - W / 2) < 1e-6 && Math.abs(centro[1] - H / 2) < 1e-6,
     JSON.stringify(centro.map((v) => +v.toFixed(3))));
 
+  /* La cámara de captura, que es donde estuvo el fallo de verdad.
+
+     El mapa no se pinta en un lienzo del tamaño del póster: se pinta en uno
+     reducido por RATIO y se amplía por su pixelRatio. Comprobar la fórmula
+     del zoom en el montaje fácil (contenedor a tamaño completo) daba cero de
+     error y no servía de nada, porque el código real usaba el otro montaje y
+     salía al doble de escala. Esta comprobación usa la fórmula de MapLibre
+     sobre la cámara que se le pasa de verdad, con su ratio. */
+  for (const ratio of [1, 2, 3]) {
+    const cam = Project.captureCamera(p, W, H, ratio);
+    const err = pts.map(([lng, lat]) => {
+      const mio = p.project(lng, lat);
+      const suyo = Project.posterPoint(cam, lng, lat, W, H, ratio);
+      return Math.hypot(mio[0] - suyo[0], mio[1] - suyo[1]);
+    });
+    comprobar(`con ratio ${ratio} el mapa cae en el mismo píxel que el collage`,
+      err.every((e) => e < 1e-6), err.map((e) => e.toFixed(1)).join(' / '));
+    comprobar(`con ratio ${ratio} el contenedor se reduce en ese factor`,
+      cam.cssW === Math.round(W / ratio) && cam.cssH === Math.round(H / ratio));
+  }
+  // Y el caso concreto que fallaba: a doble resolución, un zoom menos.
+  comprobar('a doble resolución el zoom baja exactamente uno',
+    Math.abs((p.camera(W, H).zoom - Project.captureCamera(p, W, H, 2).zoom) - 1) < 1e-12);
+
   const kmEnPx = mismo.pxPerKm(40.4);
   comprobar('pxPerKm da un número positivo y finito', kmEnPx > 0 && isFinite(kmEnPx));
 }
@@ -139,6 +163,39 @@ console.log('\nColocación de piezas');
   // El aspecto real de la foto se respeta: una vertical no sale cuadrada.
   const vert = Layout.build([{ id: 'v', lat: 40.42, lng: -3.70, weight: 1, aspect: 0.75 }], proj, W, H)[0];
   comprobar('una foto vertical da una pieza vertical', vert.h > vert.w);
+}
+
+console.log('\nParadas lejanas');
+{
+  const Trips = require('../js/trips.js');
+  const far = (l) => Layout.outliers(l, Trips.haversine).map((g) => g.id);
+
+  /* El caso que dio la cara en un póster real: un viaje entero a Londres y una
+     sola foto tomada en casa. El encuadre se abría 1283 km y el collage salía
+     aplastado arriba, con el mapa enseñando el golfo de Vizcaya. */
+  const londres = [];
+  for (let i = 0; i < 24; i++) londres.push({ id: 'L' + i, lat: 51.5 + (i % 6) * 0.01, lng: -0.12 + (i % 5) * 0.015 });
+  londres.push({ id: 'casa', lat: 40.4168, lng: -3.7038 });
+  comprobar('una foto suelta a 1200 km se detecta como lejana',
+    JSON.stringify(far(londres)) === '["casa"]', JSON.stringify(far(londres)));
+
+  // Un viaje que de verdad recorre tres ciudades no tiene nada de anómalo.
+  const esp = [];
+  for (let i = 0; i < 8; i++) esp.push({ id: 'M' + i, lat: 40.4168 + i * 0.01, lng: -3.70 });
+  for (let i = 0; i < 5; i++) esp.push({ id: 'T' + i, lat: 39.8628 + i * 0.01, lng: -4.02 });
+  for (let i = 0; i < 5; i++) esp.push({ id: 'S' + i, lat: 40.9429 + i * 0.01, lng: -4.10 });
+  comprobar('Madrid-Toledo-Segovia no marca ninguna parada como lejana',
+    far(esp).length === 0, JSON.stringify(far(esp)));
+
+  // Dos destinos a partes iguales son dos destinos, no una anomalía.
+  const dos = [];
+  for (let i = 0; i < 8; i++) dos.push({ id: 'A' + i, lat: 51.5 + i * 0.01, lng: -0.12 });
+  for (let i = 0; i < 8; i++) dos.push({ id: 'B' + i, lat: 40.41 + i * 0.01, lng: -3.70 });
+  comprobar('un viaje de dos destinos a medias no marca nada',
+    far(dos).length === 0, JSON.stringify(far(dos)));
+
+  comprobar('con muy pocas paradas no se aventura', far(londres.slice(0, 3)).length === 0);
+  comprobar('sin lista no revienta', Layout.outliers(null, Trips.haversine).length === 0);
 }
 
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');
