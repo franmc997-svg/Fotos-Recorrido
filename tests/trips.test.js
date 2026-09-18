@@ -150,13 +150,12 @@ const tq = Trips.travelStats(quietas);
 comprobar('20 fotos en el mismo sitio no suman distancia',
   tq.totalKm === 0 && tq.noiseSkipped === 19, JSON.stringify({ km: tq.totalKm, ruido: tq.noiseSkipped }));
 
-// La línea del póster
+// La línea del póster: solo el total, sin repartir por medio (eso queda en
+// el panel del editor, no en la imagen).
 const linea = (st) => Trips.travelLine(st);
-comprobar('la línea del póster reparte el total entre los medios',
-  linea(tm) === '76 km · 72 km en vehículo · 4,4 km a pie', linea(tm));
-comprobar('con un solo medio no repite la cifra',
-  linea(tp) === '4,4 km a pie', linea(tp));
-comprobar('si todo queda sin atribuir, el póster solo lleva la distancia',
+comprobar('la línea del póster lleva solo el total', linea(tm) === '76 km', linea(tm));
+comprobar('también con un solo medio', linea(tp) === '4,4 km', linea(tp));
+comprobar('también si todo queda sin atribuir',
   linea({ totalKm: 3.1, byMode: { pie: 0, rueda: 0, motor: 0, rapido: 0, desconocido: 3.1 } }) === '3,1 km');
 comprobar('sin distancia no hay línea', linea(null) === '' && linea(tq) === '');
 

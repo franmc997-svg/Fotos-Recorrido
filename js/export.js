@@ -316,7 +316,7 @@
   }
 
   /* opts: { aspect, quality, format, settings, photos, thumbs, editorWidth,
-             trackCoords, trackSegments, distance,
+             trackCoords, distance,
              camera:{center,zoom,bearing} } */
   async function render(opts) {
     const base = window.ASPECTS[opts.aspect] || window.ASPECTS['9:16'];
@@ -363,8 +363,7 @@
         theme,
         width: (opts.settings.trackWidth || 1.2) * scale,
         opacity: opts.settings.trackOpacity,
-        dotSize: opts.settings.trackDotSize == null ? 1.3 : opts.settings.trackDotSize * scale,
-        segments: opts.trackSegments
+        dotSize: opts.settings.trackDotSize == null ? 1.3 : opts.settings.trackDotSize * scale
       });
       MapView.ensureRouteLayers(map, theme);
       MapView.setRoute(map, opts.routeCoords, {

@@ -142,23 +142,6 @@
   /* Traza completa del viaje: miles de puntos se dibujan como una capa GL,
      no como marcadores. Un marcador DOM por foto mata el mapa a partir de unos
      pocos cientos. */
-  /* Colores por medio de transporte. Fijos y no del tema: tienen que
-     distinguirse entre sí, y las paletas del póster son casi monocromas. */
-  const MODE_COLORS = {
-    pie: '#4ade80',
-    rueda: '#fbbf24',
-    motor: '#60a5fa',
-    rapido: '#f472b6',
-    desconocido: '#94a3b8'
-  };
-
-  function modeColorExpr() {
-    const e = ['match', ['get', 'mode']];
-    Object.keys(MODE_COLORS).forEach((m) => { e.push(m, MODE_COLORS[m]); });
-    e.push(MODE_COLORS.desconocido);
-    return e;
-  }
-
   function ensureTrackLayers(map, theme) {
     if (!map.getSource('fr-track')) {
       map.addSource('fr-track', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -187,22 +170,9 @@
 
   function setTrack(map, coords, opts) {
     if (!map.getSource('fr-track')) return;
-    /* Con opts.segments la traza se parte en un tramo por par de fotos, cada
-       uno con su medio de transporte, para poder colorearla por modo. Sin
-       ellos va como una sola línea, que es mucho más barato de dibujar. */
-    const segs = opts.segments;
-    const line = segs && segs.length
-      ? {
-          type: 'FeatureCollection',
-          features: segs.map((sg) => ({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: [sg.from, sg.to] },
-            properties: { mode: sg.mode }
-          }))
-        }
-      : coords.length > 1
-        ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }] }
-        : { type: 'FeatureCollection', features: [] };
+    const line = coords.length > 1
+      ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }] }
+      : { type: 'FeatureCollection', features: [] };
     map.getSource('fr-track').setData(line);
     if (map.getSource('fr-track-points')) {
       map.getSource('fr-track-points').setData({
@@ -219,13 +189,9 @@
     // La traza va por debajo de la ruta y en un tono apagado: si compite con
     // la línea que une los pines, el póster se vuelve ilegible.
     if (map.getLayer('fr-track-line')) {
-      map.setPaintProperty('fr-track-line', 'line-color',
-        segs && segs.length ? modeColorExpr() : opts.theme.accent);
+      map.setPaintProperty('fr-track-line', 'line-color', opts.theme.accent);
       map.setPaintProperty('fr-track-line', 'line-width', opts.width || 1.2);
-      // Coloreada por modo pierde todo el sentido si es casi transparente.
-      map.setPaintProperty('fr-track-line', 'line-opacity',
-        segs && segs.length ? Math.max(0.55, opts.opacity == null ? 0.3 : opts.opacity)
-          : (opts.opacity == null ? 0.3 : opts.opacity));
+      map.setPaintProperty('fr-track-line', 'line-opacity', opts.opacity == null ? 0.3 : opts.opacity);
     }
     if (map.getLayer('fr-track-dots')) {
       map.setPaintProperty('fr-track-dots', 'circle-color', opts.theme.accent);
@@ -356,7 +322,7 @@
 
   window.MapView = {
     STYLE_URL, DEFAULT_STYLE, ATTRIB, PIN,
-    create, applyTheme, ensureRouteLayers, setRoute, ensureTrackLayers, setTrack, MODE_COLORS,
+    create, applyTheme, ensureRouteLayers, setRoute, ensureTrackLayers, setTrack,
     tierOf, pinSpec, TIER_SCALE,
     buildPinElement, pinAnchor, pinScale, classify
   };

@@ -43,7 +43,6 @@
       trackWidth: 1.2,
       trackOpacity: 0.3,
       trackDotSize: 1.3,
-      trackByMode: false,
       showDistance: false,
       showRoute: true,
       routeDashed: true,
@@ -213,18 +212,8 @@
       theme: theme(),
       width: s.trackWidth,
       opacity: s.trackOpacity,
-      dotSize: s.trackDotSize,
-      segments: trackSegments()
+      dotSize: s.trackDotSize
     });
-  }
-
-  /* Los tramos coloreados salen de las fotos del viaje, no de la traza
-     guardada: la traza va simplificada y ya no se puede decir qué par de
-     fotos generó cada vértice. */
-  function trackSegments() {
-    if (!state.mapDoc.settings.trackByMode) return null;
-    const st = travel();
-    return st && st.segments.length ? st.segments : null;
   }
 
   function syncRoute() {
@@ -701,20 +690,6 @@
     sec.hidden = false;
     $('travelTotal').textContent = Trips.fmtKm(st.totalKm);
 
-    const ul = $('travelBreak');
-    ul.innerHTML = '';
-    Trips.MODES.filter((m) => st.byMode[m] > 0)
-      .sort((a, b) => st.byMode[b] - st.byMode[a])
-      .forEach((m) => {
-        const li = document.createElement('li');
-        const pct = Math.round((st.byMode[m] / st.totalKm) * 100);
-        li.innerHTML = `<span class="dot" style="background:${MapView.MODE_COLORS[m]}"></span>`
-          + `<span>${escapeHtml(Trips.MODE_LABELS[m])}</span>`
-          + `<span class="km">${Trips.fmtKm(st.byMode[m])}</span>`
-          + `<span class="pct">${pct}%</span>`;
-        ul.appendChild(li);
-      });
-
     /* La honestidad del cálculo va escrita al lado de la cifra, no escondida:
        esto es una estimación entre fotos, no un GPS siguiendo la carretera. */
     const partes = [travelCache.source === 'pins'
@@ -725,10 +700,6 @@
     if (st.medianGapMin > 20) {
       partes.push(`Entre foto y foto pasan ${Math.round(st.medianGapMin)} min de mediana, `
         + 'así que se pierde todo lo que ocurrió en medio.');
-    }
-    if (st.unknownShare > 0.15) {
-      partes.push(`${Math.round(st.unknownShare * 100)}% de la distancia no se puede `
-        + 'atribuir a un medio (tramos cortos con muchas horas de hueco).');
     }
     $('travelNote').textContent = partes.join(' ');
   }
@@ -1495,7 +1466,6 @@
     $('inCoords').checked = !!s.showCoords;
     $('inFooter').checked = !!s.showFooter;
     $('inLegend').checked = !!s.showLegend;
-    $('inTrackByMode').checked = !!s.trackByMode;
     $('inShowDistance').checked = !!s.showDistance;
     $('orderMode').value = s.orderMode;
     $('groupRadius').value = radiusIndex(s.groupRadiusM || 350);
@@ -1704,7 +1674,6 @@
         thumbs,
         routeCoords: list.map((p) => [p.lng, p.lat]),
         trackCoords: state.mapDoc.track || [],
-        trackSegments: trackSegments(),
         distance: s.showDistance ? travelLine() : '',
         editorWidth: $('stage').clientWidth,
         camera: cam
@@ -1877,7 +1846,6 @@
     bindCheck('inCoords', 'showCoords', updateOverlay);
     bindCheck('inFooter', 'showFooter', updateOverlay);
     bindCheck('inLegend', 'showLegend', updateOverlay);
-    bindCheck('inTrackByMode', 'trackByMode', syncTrack);
     bindCheck('inShowDistance', 'showDistance', updateOverlay);
     $('orderMode').addEventListener('change', (e) => {
       state.mapDoc.settings.orderMode = e.target.value;

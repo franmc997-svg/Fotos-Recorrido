@@ -313,22 +313,11 @@
   }
 
   /* Una sola línea para el póster. La calcula este módulo para que el editor
-     y la imagen exportada digan exactamente lo mismo. Como máximo dos medios:
-     con cinco, la línea se hace ilegible a tamaño de póster. */
-  function travelLine(stats, maxModes) {
+     y la imagen exportada digan exactamente lo mismo. Solo el total: el
+     reparto por medio queda en el panel del editor, no en el póster. */
+  function travelLine(stats) {
     if (!stats || !(stats.totalKm > 0)) return '';
-    const top = MODES.filter((m) => stats.byMode[m] / stats.totalKm >= 0.03)
-      .sort((a, b) => stats.byMode[b] - stats.byMode[a])
-      .slice(0, maxModes == null ? 2 : maxModes);
-    // Si prácticamente todo fue de un medio, repetir la cifra sobra. Y si ese
-    // medio es "sin determinar", ponerlo en el póster no informa de nada.
-    if (top.length === 1) {
-      return top[0] === 'desconocido' ? fmtKm(stats.totalKm)
-        : fmtKm(stats.totalKm) + ' ' + MODE_SHORT[top[0]];
-    }
-    return [fmtKm(stats.totalKm)]
-      .concat(top.map((m) => fmtKm(stats.byMode[m]) + ' ' + MODE_SHORT[m]))
-      .join(' · ');
+    return fmtKm(stats.totalKm);
   }
 
   /* Douglas-Peucker sobre [lng,lat]: 3000 puntos de traza no aportan más que
