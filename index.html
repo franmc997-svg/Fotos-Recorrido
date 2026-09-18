@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fotos Recorrido — mapas de viaje</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 36'%3E%3Cpath d='M12 0C5.4 0 0 5.4 0 12c0 8.5 12 24 12 24s12-15.5 12-24C24 5.4 18.6 0 12 0z' fill='%2322e2f5'/%3E%3Ccircle cx='12' cy='12' r='4.6' fill='%2306212a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="banner" class="banner" hidden></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <strong>Fotos&nbsp;Recorrido</strong>
+  </div>
+  <div class="topbar-maps">
+    <select id="mapSelect" title="Mapa actual"></select>
+    <button id="btnNewMap" class="btn ghost" title="Crear mapa nuevo">+ Nuevo</button>
+    <button id="btnRenameMap" class="btn ghost" title="Renombrar">Renombrar</button>
+    <button id="btnDuplicateMap" class="btn ghost" title="Duplicar">Duplicar</button>
+    <button id="btnDeleteMap" class="btn ghost danger" title="Eliminar">Eliminar</button>
+  </div>
+  <div class="topbar-actions">
+    <button id="btnImport" class="btn ghost">Importar proyecto</button>
+    <button id="btnExportJson" class="btn ghost">Exportar proyecto</button>
+    <button id="btnExport" class="btn primary">Descargar imagen</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ PANEL IZQUIERDO: FOTOS ============ -->
+  <aside class="panel panel-left">
+    <div class="panel-head">
+      <h2>Fotos</h2>
+      <span id="photoCount" class="count">0</span>
+    </div>
+
+    <div id="dropzone" class="dropzone">
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+      <p><strong>Arrastra tus fotos aquí</strong></p>
+      <p class="muted">o <button id="btnPick" class="linklike">selecciónalas</button></p>
+      <p class="tiny muted">Leo la ubicación del EXIF. Las que no la tengan quedan en «Sin ubicar».</p>
+    </div>
+
+    <div id="ingestProgress" class="progress" hidden><div class="bar"></div><span></span></div>
+
+    <div class="section">
+      <div class="section-head">
+        <h3>Sin ubicar <span id="unplacedCount" class="pill warn">0</span></h3>
+      </div>
+      <p class="tiny muted" id="unplacedHelp" hidden>
+        Selecciona una y pulsa <em>Colocar</em>, luego haz clic en el mapa. O búscala por nombre de lugar.
+      </p>
+      <ul id="unplacedList" class="photolist"></ul>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <h3>En el mapa <span id="placedCount" class="pill">0</span></h3>
+        <select id="orderMode" class="mini" title="Orden del recorrido">
+          <option value="date">Orden: fecha</option>
+          <option value="manual">Orden: manual</option>
+        </select>
+      </div>
+      <ul id="placedList" class="photolist"></ul>
+    </div>
+  </aside>
+
+  <!-- ============ LIENZO ============ -->
+  <section class="canvas-area">
+    <div class="canvas-toolbar">
+      <div class="geosearch">
+        <input id="geoInput" type="search" placeholder="Buscar lugar (ciudad, monumento, dirección)…" autocomplete="off">
+        <div id="geoResults" class="geo-results" hidden></div>
+      </div>
+      <div class="toolbar-right">
+        <span id="placeMode" class="mode-chip" hidden>Modo colocar: haz clic en el mapa · <button id="cancelPlace" class="linklike">cancelar</button></span>
+        <button id="btnFit" class="btn ghost" title="Encuadrar todos los pines">Encuadrar</button>
+        <button id="btnResetNorth" class="btn ghost" title="Norte arriba">Norte</button>
+      </div>
+    </div>
+
+    <div class="stage-wrap">
+      <div id="stage" class="stage">
+        <div id="map" class="map"></div>
+        <div id="overlay" class="overlay">
+          <div id="ovLegend" class="ov-legend" hidden></div>
+          <h1 id="ovTitle" class="ov-title">MI RECORRIDO</h1>
+          <div id="ovRule" class="ov-rule"></div>
+          <div id="ovSubtitle" class="ov-subtitle">COSTA RICA</div>
+          <div id="ovCoords" class="ov-coords">9.9395° N / 84.0663° W</div>
+          <div class="overlay-footer">
+            <span id="ovBrand">fotos-recorrido</span>
+            <span id="ovAttrib">© OpenStreetMap contributors</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PANEL DERECHO: DISEÑO ============ -->
+  <aside class="panel panel-right">
+    <div class="panel-head"><h2>Diseño</h2></div>
+
+    <div class="field">
+      <label for="inTitle">Título</label>
+      <input id="inTitle" type="text" maxlength="40" placeholder="PRIMERAS CITAS">
+    </div>
+    <div class="field">
+      <label for="inSubtitle">Subtítulo</label>
+      <input id="inSubtitle" type="text" maxlength="40" placeholder="COSTA RICA">
+    </div>
+
+    <div class="field">
+      <label>Tema</label>
+      <div id="themeGrid" class="theme-grid"></div>
+    </div>
+
+    <div class="field">
+      <label for="inAspect">Formato</label>
+      <select id="inAspect">
+        <option value="9:16">Historia / Reel · 9:16</option>
+        <option value="4:5">Feed vertical · 4:5</option>
+        <option value="1:1">Cuadrado · 1:1</option>
+        <option value="3:2">Horizontal · 3:2</option>
+        <option value="2:3">Póster para imprimir · 2:3</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="inPinStyle">Estilo de pin</label>
+      <select id="inPinStyle">
+        <option value="teardrop">Gota clásica</option>
+        <option value="photo">Miniatura de la foto</option>
+        <option value="numbered">Numerado</option>
+        <option value="dot">Punto</option>
+      </select>
+    </div>
+
+    <div class="field row">
+      <label for="inPinSize">Tamaño de pin</label>
+      <input id="inPinSize" type="range" min="0.6" max="2" step="0.1" value="1">
+    </div>
+
+    <div class="field">
+      <label class="check"><input type="checkbox" id="inRoute" checked> Dibujar la ruta entre fotos</label>
+      <label class="check"><input type="checkbox" id="inRouteDashed" checked> Ruta punteada</label>
+      <label class="check"><input type="checkbox" id="inLabels"> Mostrar nombres de calles y lugares</label>
+      <label class="check"><input type="checkbox" id="inCoords" checked> Mostrar coordenadas</label>
+      <label class="check"><input type="checkbox" id="inFooter" checked> Mostrar pie y atribución</label>
+      <label class="check"><input type="checkbox" id="inLegend"> Leyenda con los títulos de las fotos</label>
+    </div>
+
+    <div class="panel-head"><h2>Foto seleccionada</h2></div>
+    <div id="selEmpty" class="muted tiny">Ninguna foto seleccionada.</div>
+    <div id="selPanel" hidden>
+      <img id="selThumb" class="sel-thumb" alt="">
+      <div class="field">
+        <label for="selCaption">Título de la foto</label>
+        <input id="selCaption" type="text" maxlength="60">
+      </div>
+      <div class="field two">
+        <div><label for="selLat">Lat</label><input id="selLat" type="number" step="0.000001"></div>
+        <div><label for="selLng">Lng</label><input id="selLng" type="number" step="0.000001"></div>
+      </div>
+      <div class="field">
+        <label for="selDate">Fecha</label>
+        <input id="selDate" type="datetime-local">
+      </div>
+      <div class="btn-row">
+        <button id="selCenter" class="btn ghost">Centrar</button>
+        <button id="selPlace" class="btn ghost">Colocar</button>
+        <button id="selDelete" class="btn ghost danger">Eliminar</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- Lightbox -->
+<div id="lightbox" class="lightbox" hidden>
+  <button id="lbClose" class="lb-close" aria-label="Cerrar">×</button>
+  <button id="lbPrev" class="lb-nav prev" aria-label="Anterior">‹</button>
+  <img id="lbImg" alt="">
+  <button id="lbNext" class="lb-nav next" aria-label="Siguiente">›</button>
+  <div id="lbCaption" class="lb-caption"></div>
+</div>
+
+<!-- Export dialog -->
+<dialog id="exportDlg" class="dlg">
+  <form method="dialog">
+    <h2>Descargar imagen</h2>
+    <div class="field">
+      <label for="exQuality">Resolución</label>
+      <select id="exQuality">
+        <option value="1">Normal — rápida</option>
+        <option value="2" selected>Alta (2×) — recomendada</option>
+        <option value="3">Máxima (3×) — para imprimir</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="exFormat">Formato</label>
+      <select id="exFormat">
+        <option value="png">PNG (sin pérdida)</option>
+        <option value="jpeg">JPG (archivo ligero)</option>
+      </select>
+    </div>
+    <p id="exSize" class="tiny muted"></p>
+    <div class="btn-row end">
+      <button value="cancel" class="btn ghost">Cancelar</button>
+      <button id="exGo" value="ok" class="btn primary">Generar</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Generando…</span></div>
+
+<input type="file" id="importInput" accept="application/json,.json" hidden>
+
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/exifr.umd.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/db.js"></script>
+<script src="js/photos.js"></script>
+<script src="js/geocode.js"></script>
+<script src="js/mapview.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
