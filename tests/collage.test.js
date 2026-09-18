@@ -33,6 +33,27 @@ console.log('\nProyección');
     isFinite(a[0]) && isFinite(a[1]) && Math.abs(a[0] - W / 2) < 1, JSON.stringify(a));
   comprobar('sin puntos tampoco revienta', isFinite(Project.fit([], W, H).project(0, 0)[0]));
 
+  // Ida y vuelta: proyectar e invertir tiene que devolver el mismo punto, o el
+  // mapa de fondo quedaría desplazado respecto al collage.
+  const rt = pts.map(([lng, lat]) => {
+    const [x, y] = p.project(lng, lat);
+    return p.invert(x, y);
+  });
+  comprobar('proyectar e invertir devuelve el punto original',
+    rt.every((v, i) => Math.abs(v[0] - pts[i][0]) < 1e-9 && Math.abs(v[1] - pts[i][1]) < 1e-9),
+    JSON.stringify(rt[0]));
+
+  /* La cámara que se le pasa al mapa de tiles tiene que reproducir la misma
+     escala: un grado de longitud debe medir los mismos píxeles en los dos. */
+  const cam = p.camera(W, H);
+  const mundoPx = 512 * Math.pow(2, cam.zoom);
+  comprobar('el zoom equivalente reproduce la escala de la proyección',
+    Math.abs(mundoPx - p.k) < 1e-6, `${mundoPx.toFixed(2)} vs ${p.k.toFixed(2)}`);
+  const centro = p.project(cam.center[0], cam.center[1]);
+  comprobar('y el centro de la cámara cae en el centro del lienzo',
+    Math.abs(centro[0] - W / 2) < 1e-6 && Math.abs(centro[1] - H / 2) < 1e-6,
+    JSON.stringify(centro.map((v) => +v.toFixed(3))));
+
   const kmEnPx = mismo.pxPerKm(40.4);
   comprobar('pxPerKm da un número positivo y finito', kmEnPx > 0 && isFinite(kmEnPx));
 }

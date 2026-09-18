@@ -148,7 +148,10 @@
        sigue la geografía y no hay forma de saber de antemano si habrá una foto
        justo ahí. La banda es papel, así que parece el pie de una lámina
        montada, no un parche. */
-    const band = H * (m.title || m.subtitle || m.meta ? 0.24 : 0.10);
+    /* Con marco, todo el bloque de texto sube: si no, el pie se cruza con el
+       filete y parece un error de imprenta. */
+    const fr = s.frame ? 4.2 * u : 0;
+    const band = H * (m.title || m.subtitle || m.meta ? 0.24 : 0.10) + fr;
     const g = ctx.createLinearGradient(0, H - band, 0, H);
     g.addColorStop(0, Paper.rgba(ink.paper, 0));
     g.addColorStop(0.45, Paper.rgba(ink.paper, 0.88));
@@ -162,11 +165,11 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
 
-    let y = H - 5.2 * u;
+    let y = H - 5.2 * u - fr;
     if (s.showFooter && m.footer) {
       ctx.font = `400 ${1.25 * u}px ${MONO}`;
       ctx.fillStyle = ink.mid;
-      ctx.fillText(m.footer, cx, H - 2.6 * u);
+      ctx.fillText(m.footer, cx, H - 2.6 * u - fr);
     }
 
     if (m.meta) {
@@ -211,6 +214,30 @@
       ctx.lineTo(cx + 9 * u, y);
       ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  /* Marco de lámina: doble filete con un respiro de papel por fuera. Es lo que
+     convierte "un mapa con fotos encima" en "una lámina enmarcada", y además
+     recorta el mapa de fondo para que no llegue crudo hasta el borde. */
+  function frame(ctx, W, H, ink, s) {
+    if (!s.frame) return;
+    const u = W / 100;
+    const m = 4.2 * u;
+    ctx.save();
+    ctx.fillStyle = ink.paper;
+    ctx.fillRect(0, 0, W, m);
+    ctx.fillRect(0, H - m, W, m);
+    ctx.fillRect(0, 0, m, H);
+    ctx.fillRect(W - m, 0, m, H);
+
+    ctx.strokeStyle = ink.mid;
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(1, 0.16 * u);
+    ctx.strokeRect(m, m, W - m * 2, H - m * 2);
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = Math.max(1, 0.07 * u);
+    ctx.strokeRect(m * 1.45, m * 1.45, W - m * 2.9, H - m * 2.9);
     ctx.restore();
   }
 
@@ -331,6 +358,16 @@
 
     Paper.base(ctx, W, H, { paper: ink.paper, ink: ink.ink, texture: s.texture });
 
+    /* El mapa va lo primero: es el contexto sobre el que se pega todo lo
+       demás. Con opacidad parcial se lee como una lámina impresa debajo, no
+       como una captura de pantalla con fotos encima. */
+    if (model.base && s.mapStrength > 0) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, s.mapStrength);
+      ctx.drawImage(model.base, 0, 0, W, H);
+      ctx.restore();
+    }
+
     halo(ctx, model.track, ink.mid, W, s.halo);
 
     if (s.showTrack) {
@@ -371,6 +408,11 @@
     }
 
     textBlock(ctx, W, H, model, s, ink);
+
+    /* El marco va antes del revelado para que el margen reciba el mismo grano
+       y el mismo duotono que el resto: si se dibuja después, queda una orla
+       lisa alrededor de un papel con textura y se nota al instante. */
+    frame(ctx, W, H, ink, s);
 
     Paper.develop(ctx, W, H, {
       paper: ink.paper, ink: ink.ink,

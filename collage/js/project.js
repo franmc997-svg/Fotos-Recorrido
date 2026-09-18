@@ -51,11 +51,19 @@
     return make((minX + maxX) / 2, (minY + maxY) / 2, k, cx, cy);
   }
 
+  // Inversa de merc: hace falta para decirle a un mapa real dónde centrarse.
+  function unmerc(x, y) {
+    const lng = x * 360 - 180;
+    const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180 / Math.PI;
+    return [lng, lat];
+  }
+
   function make(centerX, centerY, k, cx, cy) {
     const project = (lng, lat) => {
       const [x, y] = merc(lng, lat);
       return [cx + (x - centerX) * k, cy + (y - centerY) * k];
     };
+    const invert = (px, py) => unmerc(centerX + (px - cx) / k, centerY + (py - cy) / k);
     /* Píxeles por km en el centro del encuadre. Mercator estira con la
        latitud, así que esto es una aproximación local; para dimensionar
        piezas de collage sobra. */
@@ -63,8 +71,19 @@
       const rad = Math.cos(Math.max(-85, Math.min(85, lat)) * Math.PI / 180);
       return (k / 40075.017) * rad;
     };
-    return { project, pxPerKm, k, center: [centerX, centerY] };
+    /* Cámara equivalente para un mapa de tiles. MapLibre mide el mundo en
+       512·2^z píxeles CSS; k son los píxeles que ocupa el mundo entero en mi
+       proyección, así que el zoom sale de igualar ambas cifras. El centro es
+       simplemente el punto que mi proyección coloca en el medio del lienzo:
+       si los dos coinciden en escala y en centro, y los dos son Mercator,
+       coinciden en todos los puntos. Sin esto el mapa y el collage estarían
+       desplazados y las fotos caerían en la calle equivocada. */
+    const camera = (W, H) => ({
+      center: invert(W / 2, H / 2),
+      zoom: Math.log2(k / 512)
+    });
+    return { project, invert, camera, pxPerKm, k, cx, cy, center: [centerX, centerY] };
   }
 
-  return { merc, fit };
+  return { merc, unmerc, fit };
 }));

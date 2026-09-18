@@ -24,6 +24,7 @@
   function defaults() {
     return {
       aspect: '2:3', ink: 'cianotipo',
+      mapStrength: 0.8, mapLabels: false, frame: true,
       title: '', subtitle: '', showMeta: true, showFooter: true, titleScale: 1,
       shape: 'rasgado', size: 0.155, bleed: 0.35, separation: 0.32, weight: 0.55,
       pieceAlpha: 1, rotation: true, blend: 'normal', numbered: false,
@@ -268,7 +269,7 @@
     return PREVIEW_LONG / Math.max(base.w, base.h);
   }
 
-  function buildModel(W, H) {
+  function buildModel(W, H, base) {
     const stops = activeStops().slice().sort((a, b) => a.start - b.start);
     const trackPts = state.trip
       ? state.trip.photos.filter((r) => r.lat != null).sort((a, b) => (a.takenAt || 0) - (b.takenAt || 0))
@@ -316,10 +317,14 @@
     const route = pieces.map((p) => [p.x, p.y]);
 
     return {
-      pieces, track, route,
+      pieces, track, route, proj, base,
       title: s.title, subtitle: s.subtitle,
       meta: s.showMeta ? metaLine() : '',
-      footer: s.showFooter ? 'fotos-recorrido · © OpenStreetMap contributors' : '',
+      /* Con el mapa puesto hay que acreditar también a quien pone los datos:
+         no es cortesía, es la licencia. */
+      footer: s.showFooter
+        ? ('fotos-recorrido · ' + (base ? MapView.ATTRIB : '© OpenStreetMap contributors'))
+        : '',
       strain: Layout.strain(pieces, proj.pxPerKm(stops.length ? stops[0].lat : 0))
     };
   }
@@ -349,6 +354,42 @@
     return partes.join('   ·   ');
   }
 
+  /* Caché del mapa de fondo.
+
+     Traer el mapa cuesta un par de segundos, y la mayoría de los controles
+     (grano, contraste, forma de la pieza) no lo cambian. Se guarda con una
+     clave que solo incluye lo que de verdad lo afecta —tamaño, cámara, tinta y
+     rótulos— y mientras llega el nuevo se sigue dibujando el anterior, para
+     que arrastrar un deslizador no se quede congelado. */
+  const baseCache = { key: '', canvas: null, pending: '' };
+
+  function baseKey(W, H, cam) {
+    return [W, H, cam.center[0].toFixed(5), cam.center[1].toFixed(5),
+      cam.zoom.toFixed(4), s.ink, s.mapLabels ? 1 : 0].join('|');
+  }
+
+  function requestBasemap(W, H, proj) {
+    if (!s.mapStrength || !Basemap.available) return;
+    const cam = proj.camera(W, H);
+    const key = baseKey(W, H, cam);
+    if (baseCache.key === key || baseCache.pending === key) return;
+    baseCache.pending = key;
+    $('mapHint').textContent = 'Trayendo el mapa…';
+    Basemap.capture({ W, H, center: cam.center, zoom: cam.zoom, ink: inkOf(), labels: s.mapLabels })
+      .then((cv) => {
+        if (baseCache.pending !== key) return;   // llegó tarde: ya hay otra petición
+        baseCache.key = key;
+        baseCache.canvas = cv;
+        baseCache.pending = '';
+        $('mapHint').textContent = cv ? ''
+          : 'No pude traer el mapa: sin conexión o bloqueado. El collage se dibuja igual.';
+        draw();
+      })
+      .catch(() => { baseCache.pending = ''; $('mapHint').textContent = 'No pude traer el mapa.'; });
+  }
+
+  function inkOf() { return window.INKS[s.ink] || window.INKS.cianotipo; }
+
   let raf = 0;
   function rebuild() {
     if (raf) return;
@@ -370,8 +411,9 @@
       ctx.clearRect(0, 0, w, h);
       return;
     }
-    const model = buildModel(w, h);
+    const model = buildModel(w, h, s.mapStrength ? baseCache.canvas : null);
     state.pieces = model.pieces;
+    requestBasemap(w, h, model.proj);
     Render.render(cv.getContext('2d'), w, h, model, s);
 
     /* La distorsión se enseña siempre, no solo cuando se pasa de la raya: es
@@ -404,7 +446,18 @@
       await new Promise((r) => setTimeout(r, 30));
       const cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
-      Render.render(cv.getContext('2d'), w, h, buildModel(w, h), s);
+      /* El mapa de la vista previa no sirve aquí: ampliado a tres veces se
+         vería borroso justo debajo de unas fotos nítidas. Se pide otro a la
+         resolución final. */
+      let base = null;
+      if (s.mapStrength && Basemap.available) {
+        busy(true, 'Trayendo el mapa a resolución final…');
+        const cam = buildModel(w, h, null).proj.camera(w, h);
+        base = await Basemap.capture({ W: w, H: h, center: cam.center, zoom: cam.zoom,
+          ink: inkOf(), labels: s.mapLabels });
+        busy(true, `Generando ${w} × ${h}…`);
+      }
+      Render.render(cv.getContext('2d'), w, h, buildModel(w, h, base), s);
       const blob = await new Promise((res) =>
         cv.toBlob(res, fmt === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92));
       if (!blob) throw new Error('blob');
@@ -557,6 +610,8 @@
     $('inRouteAbove').checked = !!s.routeAbove;
     $('inRouteLong').checked = !!s.routeLongOnly;
     $('inMarks').checked = s.marks;
+    $('inFrame').checked = s.frame;
+    $('inMapLabels').checked = s.mapLabels;
     const put = (id, v, dec) => {
       $(id).value = v;
       const lab = $(id + 'Val');
@@ -578,6 +633,7 @@
     put('inTexture', Math.round(s.texture * 100));
     put('inGrime', Math.round(s.grime * 100));
     put('inShadow', Math.round(s.shadow * 100));
+    put('inMap', Math.round(s.mapStrength * 100));
     $('inGroup').value = String(RADII.indexOf(s.groupRadiusM) >= 0 ? RADII.indexOf(s.groupRadiusM) : 4);
     $('inGroupVal').textContent = fmtM(s.groupRadiusM);
   }
@@ -656,6 +712,9 @@
     range('inGrime', (v) => { s.grime = v / 100; }, (v) => v + '%');
     range('inShadow', (v) => { s.shadow = v / 100; }, (v) => v + '%');
     check('inMarks', (v) => { s.marks = v; });
+    check('inFrame', (v) => { s.frame = v; });
+    range('inMap', (v) => { s.mapStrength = v / 100; }, (v) => v + '%');
+    check('inMapLabels', (v) => { s.mapLabels = v; });
 
     // Estos dos sí rehacen las paradas, que es caro: van al soltar, no al mover.
     $('inPieces').addEventListener('input', (e) => {

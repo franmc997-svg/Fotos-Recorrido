@@ -10,6 +10,7 @@
 <base href="../">
 <title>Escaneos del recorrido — collage de fotos</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='3' fill='%23e8e4d6'/%3E%3Cpath d='M5 21l6-8 5 6 4-5 7 9z' fill='%230d2c4d'/%3E%3Ccircle cx='11' cy='9' r='3' fill='%233f6d99'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
 <link rel="stylesheet" href="collage/css/collage.css">
 </head>
 <body>
@@ -146,6 +147,21 @@
     </section>
 
     <section class="section">
+      <div class="section-head"><h3>Mapa de fondo</h3></div>
+      <p class="tiny muted">
+        Un mapa real bajo el collage, redibujado con la misma tinta del papel,
+        para que se reconozca dónde queda todo esto.
+      </p>
+      <div class="field">
+        <label for="inMap">Presencia del mapa: <b id="inMapVal">80</b>%</label>
+        <input id="inMap" type="range" min="0" max="100" step="5" value="80">
+      </div>
+      <label class="check"><input type="checkbox" id="inMapLabels"> Nombres de calles y lugares</label>
+      <label class="check"><input type="checkbox" id="inFrame" checked> Marco de lámina</label>
+      <p id="mapHint" class="tiny muted"></p>
+    </section>
+
+    <section class="section">
       <div class="section-head"><h3>Recorrido</h3></div>
       <label class="check"><input type="checkbox" id="inTrack" checked> Traza fina de todas las fotos</label>
       <label class="check"><input type="checkbox" id="inRoute" checked> Hilo que une las piezas</label>
@@ -243,16 +259,19 @@
 
 <div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Trabajando…</span></div>
 
+<script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/exifr.umd.js"></script>
 <script src="js/themes.js"></script>
 <script src="js/heic.js"></script>
 <script src="js/scan.js"></script>
 <script src="js/trips.js"></script>
 <script src="js/photos.js"></script>
+<script src="js/mapview.js"></script>
 <script src="collage/js/inks.js"></script>
 <script src="collage/js/project.js"></script>
 <script src="collage/js/layout.js"></script>
 <script src="collage/js/paper.js"></script>
+<script src="collage/js/basemap.js"></script>
 <script src="collage/js/render.js"></script>
 <script src="collage/js/store.js"></script>
 <script src="collage/js/app.js"></script>
