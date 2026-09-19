@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- El <base> apunta a la raíz del repositorio para poder reutilizar tal cual
+     los módulos y los binarios de la otra herramienta (libheif busca su .wasm
+     por ruta relativa al documento). Por eso los archivos propios de esta
+     página llevan el prefijo collage/. -->
+<base href="../">
+<title>Escaneos del recorrido — collage de fotos</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='3' fill='%23e8e4d6'/%3E%3Cpath d='M5 21l6-8 5 6 4-5 7 9z' fill='%230d2c4d'/%3E%3Ccircle cx='11' cy='9' r='3' fill='%233f6d99'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="collage/css/collage.css">
+</head>
+<body>
+
+<div id="banner" class="banner" hidden></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <strong>Escaneos&nbsp;del&nbsp;recorrido</strong>
+    <span class="tiny muted">collage · experimental</span>
+  </div>
+  <div class="topbar-actions">
+    <a class="btn ghost" href="index.html">← Herramienta de mapas</a>
+    <button id="btnExport" class="btn primary" disabled>Descargar imagen</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ---------- izquierda: fotos y viaje ---------- -->
+  <aside class="panel left">
+    <section class="section">
+      <div class="section-head"><h3>1 · Fotos</h3></div>
+      <p class="tiny muted">
+        Se leen las coordenadas y la fecha de cada archivo. Las imágenes solo se
+        descodifican para las piezas que entran en el collage.
+      </p>
+      <div class="btn-row">
+        <button id="btnPick" class="btn primary">Elegir fotos…</button>
+        <button id="btnPickFolder" class="btn ghost">Carpeta…</button>
+      </div>
+      <input type="file" id="fileInput" accept="image/*,.heic,.heif,.HEIC,.HEIF" multiple hidden>
+      <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+      <div id="scanProgress" class="progress" hidden><div class="bar"></div><span></span></div>
+      <p id="scanSummary" class="tiny summary" hidden></p>
+    </section>
+
+    <section id="tripSection" class="section" hidden>
+      <div class="section-head">
+        <h3>2 · Recorrido <span id="tripCount" class="pill">0</span></h3>
+      </div>
+      <ul id="tripList" class="triplist"></ul>
+      <p id="tripDiag" class="tiny muted" hidden></p>
+    </section>
+
+    <section id="pieceSection" class="section" hidden>
+      <div class="section-head">
+        <h3>3 · Piezas <span id="pieceCount" class="pill">0</span></h3>
+      </div>
+      <div class="field">
+        <label for="inPieces">Cuántas fotos entran: <b id="inPiecesVal">16</b></label>
+        <input id="inPieces" type="range" min="3" max="260" step="1" value="16">
+      </div>
+      <p class="tiny muted">
+        Por defecto entran todas las fotos con GPS del viaje. Este límite solo
+        hace falta si son demasiadas para el papel o el navegador.
+      </p>
+      <div class="field">
+        <label for="inGroup">Agrupar fotos a menos de <b id="inGroupVal">500 m</b></label>
+        <input id="inGroup" type="range" min="0" max="14" step="1" value="5">
+      </div>
+      <p id="farHint" class="tiny warn-text" hidden></p>
+      <div class="btn-row">
+        <button id="btnDropFar" class="btn tiny ghost" hidden>Dejar fuera los lejanos</button>
+      </div>
+      <p id="pieceNote" class="tiny muted"></p>
+      <ul id="pieceList" class="piecelist"></ul>
+    </section>
+  </aside>
+
+  <!-- ---------- centro: el póster ---------- -->
+  <section class="stage-area">
+    <div class="stage-tools">
+      <select id="inAspect" class="mini" title="Formato"></select>
+      <select id="inInk" class="mini" title="Tinta"></select>
+      <span id="strainHint" class="tiny warn-text" hidden></span>
+    </div>
+    <div id="stageWrap" class="stage-wrap">
+      <canvas id="stage" class="stage"></canvas>
+      <div id="stageEmpty" class="stage-empty">
+        <p>Elige unas fotos con GPS para empezar.</p>
+        <p class="tiny muted">Funciona mejor con fotos de un mismo viaje.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- derecha: aspecto ---------- -->
+  <aside class="panel right">
+    <section class="section">
+      <div class="section-head"><h3>Textos</h3></div>
+      <div class="field">
+        <label for="inTitle">Título</label>
+        <input id="inTitle" type="text" maxlength="48" placeholder="Cuaderno de viaje">
+      </div>
+      <div class="field">
+        <label for="inSubtitle">Subtítulo</label>
+        <input id="inSubtitle" type="text" maxlength="40" placeholder="TOLEDO · SEGOVIA">
+      </div>
+      <label class="check"><input type="checkbox" id="inMeta" checked> Fechas y distancia bajo el título</label>
+      <label class="check"><input type="checkbox" id="inFooter" checked> Pie con la atribución</label>
+      <div class="field">
+        <label for="inTitleScale">Tamaño del título: <b id="inTitleScaleVal">100</b>%</label>
+        <input id="inTitleScale" type="range" min="40" max="180" step="5" value="100">
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h3>Collage</h3></div>
+      <div class="field">
+        <label for="inShape">Forma de las piezas</label>
+        <select id="inShape">
+          <option value="rasgado">Papel rasgado</option>
+          <option value="mancha">Mancha (se funden entre sí)</option>
+          <option value="polaroid">Copia con margen</option>
+          <option value="recorte">Recorte recto</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="inSize">Tamaño de las piezas: <b id="inSizeVal">16</b>%</label>
+        <input id="inSize" type="range" min="4" max="45" step="1" value="16">
+      </div>
+      <div class="field">
+        <label for="inBleed">Difuminado del borde: <b id="inBleedVal">35</b>%</label>
+        <input id="inBleed" type="range" min="0" max="95" step="5" value="35">
+      </div>
+      <div class="field">
+        <label for="inSeparation">Solape: <b id="inSeparationVal">32</b>%</label>
+        <input id="inSeparation" type="range" min="0" max="70" step="2" value="32">
+      </div>
+      <div class="field">
+        <label for="inWeight">Agrandar donde hay más fotos: <b id="inWeightVal">55</b>%</label>
+        <input id="inWeight" type="range" min="0" max="150" step="5" value="55">
+      </div>
+      <div class="field">
+        <label for="inAlpha">Opacidad de las fotos: <b id="inAlphaVal">100</b>%</label>
+        <input id="inAlpha" type="range" min="20" max="100" step="5" value="100">
+      </div>
+      <label class="check"><input type="checkbox" id="inRotation" checked> Piezas ligeramente giradas</label>
+      <label class="check"><input type="checkbox" id="inMultiply"> Sobreimpresión donde se solapan</label>
+      <label class="check"><input type="checkbox" id="inNumbered"> Numerar las piezas</label>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h3>Mapa de fondo</h3></div>
+      <p class="tiny muted">
+        Un mapa real bajo el collage, redibujado con la misma tinta del papel,
+        para que se reconozca dónde queda todo esto.
+      </p>
+      <div class="field">
+        <label for="inMap">Presencia del mapa: <b id="inMapVal">80</b>%</label>
+        <input id="inMap" type="range" min="0" max="100" step="5" value="80">
+      </div>
+      <div class="field">
+        <label for="inMapStain">Las fotos manchan las calles de su sitio: <b id="inMapStainVal">45</b>%</label>
+        <input id="inMapStain" type="range" min="0" max="100" step="5" value="45">
+      </div>
+      <label class="check"><input type="checkbox" id="inMapLabels"> Nombres de calles y lugares</label>
+      <label class="check"><input type="checkbox" id="inFrame" checked> Marco de lámina</label>
+      <p id="mapHint" class="tiny muted"></p>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h3>Recorrido</h3></div>
+      <label class="check"><input type="checkbox" id="inTrack" checked> Traza fina de todas las fotos</label>
+      <label class="check"><input type="checkbox" id="inRoute" checked> Hilo que une las piezas</label>
+      <label class="check"><input type="checkbox" id="inRouteDashed"> Hilo punteado</label>
+      <label class="check"><input type="checkbox" id="inRouteAbove" checked> Hilo por encima de las fotos</label>
+      <label class="check"><input type="checkbox" id="inRouteLong" checked> Hilo solo entre zonas alejadas</label>
+      <div class="field">
+        <label for="inRouteWidth">Grosor del hilo: <b id="inRouteWidthVal">1.2</b></label>
+        <input id="inRouteWidth" type="range" min="0.4" max="6" step="0.2" value="1.2">
+      </div>
+      <div class="field">
+        <label for="inHalo">Relieve alrededor de la traza: <b id="inHaloVal">60</b>%</label>
+        <input id="inHalo" type="range" min="0" max="150" step="10" value="60">
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h3>Escaneo</h3></div>
+      <div class="field">
+        <label for="inDuotone">Tinta sobre la foto: <b id="inDuotoneVal">70</b>%</label>
+        <input id="inDuotone" type="range" min="0" max="100" step="5" value="70">
+      </div>
+      <div class="field">
+        <label for="inContrast">Contraste: <b id="inContrastVal">1.25</b></label>
+        <input id="inContrast" type="range" min="0.6" max="2.4" step="0.05" value="1.25">
+      </div>
+      <div class="field">
+        <label for="inBrightness">Exposición: <b id="inBrightnessVal">0</b></label>
+        <input id="inBrightness" type="range" min="-0.25" max="0.25" step="0.01" value="0">
+      </div>
+      <div class="field">
+        <label for="inGrain">Grano: <b id="inGrainVal">9</b>%</label>
+        <input id="inGrain" type="range" min="0" max="30" step="1" value="9">
+      </div>
+      <div class="field">
+        <label for="inTexture">Textura del papel: <b id="inTextureVal">70</b>%</label>
+        <input id="inTexture" type="range" min="0" max="150" step="10" value="70">
+      </div>
+      <div class="field">
+        <label for="inGrime">Suciedad del escáner: <b id="inGrimeVal">45</b>%</label>
+        <input id="inGrime" type="range" min="0" max="120" step="5" value="45">
+      </div>
+      <div class="field">
+        <label for="inShadow">Sombra de las piezas: <b id="inShadowVal">40</b>%</label>
+        <input id="inShadow" type="range" min="0" max="120" step="10" value="40">
+      </div>
+      <label class="check"><input type="checkbox" id="inMarks" checked> Marcas de registro en las esquinas</label>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h3>Proyecto</h3></div>
+      <div class="btn-row">
+        <button id="btnSave" class="btn ghost" disabled>Guardar</button>
+        <button id="btnLoad" class="btn ghost">Abrir…</button>
+        <button id="btnReset" class="btn ghost danger">Valores de fábrica</button>
+      </div>
+      <p id="saveNote" class="tiny muted"></p>
+    </section>
+  </aside>
+</main>
+
+<dialog id="loadDlg" class="dlg">
+  <form method="dialog">
+    <h3>Proyectos guardados</h3>
+    <ul id="loadList" class="loadlist"></ul>
+    <menu><button value="cancel" class="btn ghost">Cerrar</button></menu>
+  </form>
+</dialog>
+
+<dialog id="exportDlg" class="dlg">
+  <form method="dialog">
+    <h3>Descargar</h3>
+    <div class="field">
+      <label for="exQuality">Resolución</label>
+      <select id="exQuality">
+        <option value="1">Pantalla (1×)</option>
+        <option value="2" selected>Buena (2×)</option>
+        <option value="3">Impresión (3×)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="exFormat">Formato</label>
+      <select id="exFormat">
+        <option value="png">PNG</option>
+        <option value="jpeg">JPG</option>
+      </select>
+    </div>
+    <p id="exSize" class="tiny muted"></p>
+    <menu>
+      <button value="cancel" class="btn ghost">Cancelar</button>
+      <button id="exGo" value="ok" class="btn primary">Generar</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Trabajando…</span></div>
+
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/exifr.umd.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/heic.js"></script>
+<script src="js/scan.js"></script>
+<script src="js/trips.js"></script>
+<script src="js/photos.js"></script>
+<script src="js/mapview.js"></script>
+<script src="collage/js/inks.js"></script>
+<script src="collage/js/project.js"></script>
+<script src="collage/js/layout.js"></script>
+<script src="collage/js/paper.js"></script>
+<script src="collage/js/basemap.js"></script>
+<script src="collage/js/render.js"></script>
+<script src="collage/js/store.js"></script>
+<script src="collage/js/app.js"></script>
+</body>
+</html>
