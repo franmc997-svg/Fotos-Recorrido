@@ -33,6 +33,7 @@
       shape: 'rasgado', size: 0.155, bleed: 0.35, separation: 0.32, weight: 0.55,
       pieceAlpha: 1, rotation: true, blend: 'normal', numbered: false,
       pieces: 16, groupRadiusM: 500,
+      frameZoom: 1, framePanX: 0, framePanY: 0,
       showTrack: true, trackWidth: 1, trackOpacity: 1,
       showRoute: true, routeDashed: false, routeAbove: true, routeLongOnly: true,
       routeWidth: 1.2, halo: 0.35,
@@ -352,11 +353,19 @@
        Con margen fijo o el collage se salía del papel o quedaba flotando en
        medio con un tercio del póster vacío. */
     const pad = s.size * 0.55;
-    const proj = Project.fit(all, W, H, {
+    const autoProj = Project.fit(all, W, H, {
       padX: Math.min(0.26, 0.035 + pad),
       padTop: Math.min(0.24, 0.035 + pad),
       padBottom: Math.min(0.34, 0.20 + pad * 0.5)
     });
+    /* Encuadre manual, igual que "Encuadrar" y el zoom de la otra herramienta:
+       el ajuste automático es el punto de partida, no la última palabra. Un
+       viaje apretado en una esquina o una pieza que roza el borde se arreglan
+       alejando o corriendo el encuadre, sin tocar el tamaño de las piezas. */
+    const proj = (s.frameZoom === 1 && !s.framePanX && !s.framePanY) ? autoProj
+      : Project.recenter(autoProj, s.frameZoom,
+          -(s.framePanX / 100) * (W / 2) / autoProj.k,
+          -(s.framePanY / 100) * (H / 2) / autoProj.k);
 
     const pieces = Layout.build(
       list.map(({ r, weight }) => {
@@ -722,6 +731,9 @@
     put('inShadow', Math.round(s.shadow * 100));
     put('inMap', Math.round(s.mapStrength * 100));
     put('inMapStain', Math.round(s.mapStain * 100));
+    put('inFrameZoom', Math.round(s.frameZoom * 100));
+    put('inFramePanX', Math.round(s.framePanX));
+    put('inFramePanY', Math.round(s.framePanY));
     $('inGroup').value = String(RADII.indexOf(s.groupRadiusM) >= 0 ? RADII.indexOf(s.groupRadiusM) : 4);
     $('inGroupVal').textContent = fmtM(s.groupRadiusM);
   }
@@ -816,6 +828,19 @@
       $('inGroupVal').textContent = fmtM(s.groupRadiusM);
     });
     $('inGroup').addEventListener('change', () => { recomputeStops(); markDirty(); });
+
+    // Encuadre manual: alejar para ver más sitio, o correr el centro para que
+    // una pieza que roza el borde quede dentro. Igual que "Encuadrar" y el
+    // zoom de la otra herramienta, pero sobre el ajuste automático.
+    range('inFrameZoom', (v) => { s.frameZoom = v / 100; }, (v) => v + '%');
+    range('inFramePanX', (v) => { s.framePanX = v; }, (v) => v + '%');
+    range('inFramePanY', (v) => { s.framePanY = v; }, (v) => v + '%');
+    $('btnFrameReset').onclick = () => {
+      s.frameZoom = 1; s.framePanX = 0; s.framePanY = 0;
+      syncControls();
+      rebuild();
+      markDirty();
+    };
 
     $('btnExport').onclick = () => {
       const { w, h } = canvasSize(Number($('exQuality').value) || 2);

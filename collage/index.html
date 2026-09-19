@@ -79,6 +79,27 @@
       </div>
       <p id="pieceNote" class="tiny muted"></p>
       <ul id="pieceList" class="piecelist"></ul>
+
+      <div class="section-head"><h3>Encuadre</h3></div>
+      <p class="tiny muted">
+        El ajuste automático encaja las piezas elegidas; si una queda pegada
+        al borde o quieres ver más del sitio, ajusta aquí.
+      </p>
+      <div class="field">
+        <label for="inFrameZoom">Zoom del encuadre: <b id="inFrameZoomVal">100</b>%</label>
+        <input id="inFrameZoom" type="range" min="50" max="200" step="5" value="100">
+      </div>
+      <div class="field">
+        <label for="inFramePanX">Desplazar horizontal: <b id="inFramePanXVal">0</b>%</label>
+        <input id="inFramePanX" type="range" min="-50" max="50" step="2" value="0">
+      </div>
+      <div class="field">
+        <label for="inFramePanY">Desplazar vertical: <b id="inFramePanYVal">0</b>%</label>
+        <input id="inFramePanY" type="range" min="-50" max="50" step="2" value="0">
+      </div>
+      <div class="btn-row">
+        <button id="btnFrameReset" class="btn tiny ghost">Restablecer encuadre</button>
+      </div>
     </section>
   </aside>
 

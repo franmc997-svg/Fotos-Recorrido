@@ -51,6 +51,15 @@
     return make((minX + maxX) / 2, (minY + maxY) / 2, k, cx, cy);
   }
 
+  /* Ajuste manual sobre el encuadre automático: alejar para ver más sitio (o
+     acercar si sobra papel vacío), y desplazar el centro sin rehacer el
+     cálculo de caja. Se separa de fit() para poder resetearlo sin perder de
+     vista cuál era el ajuste automático. */
+  function recenter(f, zoom, dx, dy) {
+    const k = f.k * (zoom || 1);
+    return make(f.center[0] + (dx || 0), f.center[1] + (dy || 0), k, f.cx, f.cy);
+  }
+
   // Inversa de merc: hace falta para decirle a un mapa real dónde centrarse.
   function unmerc(x, y) {
     const lng = x * 360 - 180;
@@ -116,5 +125,5 @@
     return [W / 2 + (x - cx) * world, H / 2 + (y - cy) * world];
   }
 
-  return { merc, unmerc, fit, captureCamera, posterPoint };
+  return { merc, unmerc, fit, recenter, captureCamera, posterPoint };
 }));
