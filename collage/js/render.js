@@ -102,6 +102,64 @@
     return c;
   }
 
+  /* Mancha de mapa: la foto tiñe las calles y edificios reales de alrededor
+     de donde se tomó. Se pinta en el punto geográfico verdadero de la pieza
+     (p.ax, p.ay), no en su posición ya empujada por la física de separación
+     (p.x, p.y): si una foto del Louvre acaba desplazada dos manzanas para no
+     tapar a su vecina, lo que tiene que mancharlo sigue siendo el punto real,
+     o la mancha cae donde no toca. Va borrosa, en tono de la tinta y con
+     mezcla "multiply": tiñe lo que ya hay dibujado en vez de tapar lo, que es
+     lo que distingue una mancha de una pegatina. */
+  function makeStainPatch(piece, size, ink) {
+    const w = Math.max(2, Math.round(size));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = w;
+    const ctx = c.getContext('2d');
+    ctx.translate(w / 2, w / 2);
+    ctx.filter = `blur(${Math.round(w * 0.06)}px) saturate(0.6) contrast(0.9)`;
+    drawCover(ctx, piece.img, w, w);
+    ctx.filter = 'none';
+
+    // Máscara radial: se ve el centro, el borde se disuelve en las calles.
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.save();
+    ctx.scale(w / 2, w / 2);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, 'rgba(0,0,0,0.85)');
+    g.addColorStop(0.5, 'rgba(0,0,0,0.5)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(-1, -1, 2, 2);
+    ctx.restore();
+
+    // Un barniz de la tinta del papel: sin esto la mancha mete un color de
+    // foto que no pega con la lámina.
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = ink.ink;
+    ctx.globalAlpha = 0.22;
+    ctx.fillRect(-w / 2, -w / 2, w, w);
+
+    return c;
+  }
+
+  function mapStains(ctx, W, H, model, s, ink) {
+    if (!model.base || s.mapStrength <= 0 || !s.mapStain) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    for (const p of model.pieces) {
+      if (!p.img) continue;
+      const size = p.w * 2.4;
+      const key = `stain|${p.id}|${Math.round(size)}|${s.ink}`;
+      const patch = cacheGet(key, () => makeStainPatch(p, size, ink));
+      ctx.save();
+      ctx.globalAlpha = s.mapStain;
+      ctx.translate(p.ax, p.ay);
+      ctx.drawImage(patch, -patch.width / 2, -patch.height / 2);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   /* Halo alrededor de la traza: no es un mapa real, es lo que hace que el
      papel vacío no parezca un error. Anillos cada vez más tenues, como las
      curvas de nivel de un plano dibujado a mano. */
@@ -367,6 +425,8 @@
       ctx.drawImage(model.base, 0, 0, W, H);
       ctx.restore();
     }
+
+    mapStains(ctx, W, H, model, s, ink);
 
     halo(ctx, model.track, ink.mid, W, s.halo);
 

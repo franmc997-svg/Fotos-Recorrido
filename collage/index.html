@@ -63,8 +63,12 @@
       </div>
       <div class="field">
         <label for="inPieces">Cuántas fotos entran: <b id="inPiecesVal">16</b></label>
-        <input id="inPieces" type="range" min="3" max="80" step="1" value="16">
+        <input id="inPieces" type="range" min="3" max="260" step="1" value="16">
       </div>
+      <p class="tiny muted">
+        Por defecto entran todas las fotos con GPS del viaje. Este límite solo
+        hace falta si son demasiadas para el papel o el navegador.
+      </p>
       <div class="field">
         <label for="inGroup">Agrupar fotos a menos de <b id="inGroupVal">500 m</b></label>
         <input id="inGroup" type="range" min="0" max="14" step="1" value="5">
@@ -159,6 +163,10 @@
       <div class="field">
         <label for="inMap">Presencia del mapa: <b id="inMapVal">80</b>%</label>
         <input id="inMap" type="range" min="0" max="100" step="5" value="80">
+      </div>
+      <div class="field">
+        <label for="inMapStain">Las fotos manchan las calles de su sitio: <b id="inMapStainVal">45</b>%</label>
+        <input id="inMapStain" type="range" min="0" max="100" step="5" value="45">
       </div>
       <label class="check"><input type="checkbox" id="inMapLabels"> Nombres de calles y lugares</label>
       <label class="check"><input type="checkbox" id="inFrame" checked> Marco de lámina</label>

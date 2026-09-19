@@ -9,7 +9,11 @@
   const PREVIEW_LONG = 1100;   // lado mayor del lienzo de vista previa
   const PATCH_PX = 760;        // resolución a la que se guarda cada pieza
   const STORE_PX = 640;        // resolución a la que se persiste en el navegador
-  const MAX_PIECES = 80;
+  // Tope de piezas simultáneas. Coincide a propósito con el MAX_CACHE de
+  // render.js: si se pintaran más piezas que caché de parches, el caché se
+  // vaciaría entero dentro de un mismo repintado y cada pieza se recortaría
+  // de nuevo en cada fotograma.
+  const MAX_PIECES = 260;
 
   // Pasos de la distancia de agrupación: lineal no sirve, hace falta acertar
   // tanto 50 m como 20 km.
@@ -24,7 +28,7 @@
   function defaults() {
     return {
       aspect: '2:3', ink: 'cianotipo',
-      mapStrength: 0.8, mapLabels: false, frame: true,
+      mapStrength: 0.8, mapStain: 0.45, mapLabels: false, frame: true,
       title: '', subtitle: '', showMeta: true, showFooter: true, titleScale: 1,
       shape: 'rasgado', size: 0.155, bleed: 0.35, separation: 0.32, weight: 0.55,
       pieceAlpha: 1, rotation: true, blend: 'normal', numbered: false,
@@ -150,6 +154,14 @@
        fechas, y rellenarlo con lo mismo imprimía el rango dos veces. Queda
        para que el usuario escriba los lugares. */
     $('pieceSection').hidden = false;
+    /* Por defecto entran todas las fotos con GPS: el collage es de fotos, no
+       de una fotografía por parada. El tope solo aparece si el viaje trae más
+       fotos de las que el papel puede permitirse (memoria de las imágenes
+       descodificadas), y entonces se reparte por igual a lo largo del viaje. */
+    const totalGps = trip.photos.filter((r) => r.lat != null && r.takenAt != null).length;
+    s.pieces = Math.min(Math.max(totalGps, 3), MAX_PIECES);
+    $('inPieces').value = s.pieces;
+    $('inPiecesVal').textContent = String(s.pieces);
     await recomputeStops();
   }
 
@@ -157,15 +169,35 @@
   async function recomputeStops() {
     if (!state.trip) return;
     const photos = state.trip.photos.filter((r) => r.lat != null && r.takenAt != null);
-    const all = Trips.stops(photos, { radiusKm: s.groupRadiusM / 1000 });
-    const want = Math.min(s.pieces, MAX_PIECES, all.length);
-    const picked = Trips.rankGroups(all, want);
-    const keep = new Set(picked.map((p) => p.id));
-    state.stops = all.filter((g) => keep.has(g.id));
+    state.stops = Trips.stops(photos, { radiusKm: s.groupRadiusM / 1000 });
     state.off = new Set();
     renderPieceList();
     await loadImages();
     rebuild();
+  }
+
+  /* Cada foto de cada parada activa es su propia pieza: antes solo se
+     descodificaba la foto más centrada de cada parada, así que un collage de
+     190 fotos en 37 paradas nunca enseñaba más de 37. El tope (s.pieces) ya
+     no cuenta paradas, cuenta fotos, y si el viaje trae más de las que caben
+     se reparten en el tiempo en vez de comerse solo el final. */
+  function piecePhotos() {
+    const list = [];
+    for (const g of activeStops()) {
+      const photos = g.photos && g.photos.length ? g.photos : (g.rep ? [g.rep] : []);
+      for (const r of photos) list.push({ r, weight: g.count || photos.length || 1 });
+    }
+    const cap = Math.max(1, Math.min(s.pieces || MAX_PIECES, MAX_PIECES));
+    if (list.length <= cap) return list;
+    const picked = [];
+    const seen = new Set();
+    for (let i = 0; i < cap; i++) {
+      const idx = Math.round(i * (list.length - 1) / Math.max(1, cap - 1));
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      picked.push(list[idx]);
+    }
+    return picked;
   }
 
   const outliers = (list) => Layout.outliers(list, Trips.haversine);
@@ -194,7 +226,7 @@
   }
 
   function renderPieceList() {
-    $('pieceCount').textContent = String(activeStops().length);
+    $('pieceCount').textContent = String(piecePhotos().length);
     renderOutlierHint();
     const ul = $('pieceList');
     ul.innerHTML = '';
@@ -223,9 +255,12 @@
       ul.appendChild(li);
     });
     const total = state.trip ? state.trip.photos.filter((r) => r.lat != null).length : 0;
+    const shown = piecePhotos().length;
     $('pieceNote').textContent = state.stops.length
-      ? `De ${total} fotos con GPS, ${state.stops.length} paradas entran como pieza. `
-        + 'La traza fina sigue dibujándose con todas.'
+      ? (shown >= total
+          ? `Se muestran las ${shown} fotos con GPS, repartidas en ${state.stops.length} lugares.`
+          : `Se muestran ${shown} de ${total} fotos con GPS (sube "cuántas fotos entran" para ver más), `
+            + `repartidas en ${state.stops.length} lugares.`)
       : '';
   }
 
@@ -257,15 +292,21 @@
   }
 
   async function loadImages() {
-    const pend = state.stops.filter((g) => g.rep && !state.imgs.has(g.rep.idx));
+    const seen = new Set();
+    const pend = [];
+    for (const { r } of piecePhotos()) {
+      if (state.imgs.has(r.idx) || seen.has(r.idx)) continue;
+      seen.add(r.idx);
+      pend.push(r);
+    }
     if (!pend.length) return;
     let done = 0, failed = 0;
     busy(true, `Abriendo imágenes… 0 / ${pend.length}`);
-    for (const g of pend) {
-      const file = state.refs.get(g.rep.idx);
+    for (const r of pend) {
+      const file = state.refs.get(r.idx);
       try {
         if (!file) throw new Error('sin archivo');
-        state.imgs.set(g.rep.idx, await decodePatch(file));
+        state.imgs.set(r.idx, await decodePatch(file));
       } catch (e) {
         failed++;
       }
@@ -273,7 +314,7 @@
       busy(true, `Abriendo imágenes… ${done} / ${pend.length}`);
       // Un respiro entre fotos: sin esto la pestaña se congela y en el móvil
       // parece que la aplicación ha muerto.
-      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r2) => setTimeout(r2, 0));
     }
     busy(false);
     if (failed) {
@@ -292,7 +333,7 @@
   }
 
   function buildModel(W, H, base) {
-    const stops = activeStops().slice().sort((a, b) => a.start - b.start);
+    const list = piecePhotos();
     const trackPts = state.trip
       ? state.trip.photos.filter((r) => r.lat != null).sort((a, b) => (a.takenAt || 0) - (b.takenAt || 0))
       : [];
@@ -304,7 +345,7 @@
        por ciento de océano y el collage aplastado en una esquina, sin forma de
        arreglarlo desde la interfaz. La traza sigue dibujándose entera; lo que
        se salga del encuadre se sale, que es lo que se espera al elegir. */
-    const all = stops.map((g) => [g.lng, g.lat]);
+    const all = list.map(({ r }) => [r.lng, r.lat]);
     /* El margen se calcula a partir del tamaño de pieza: las piezas se
        dibujan centradas en su punto, así que la mitad de la pieza sobresale
        del encuadre de los puntos y hay que reservarle sitio, ni más ni menos.
@@ -318,11 +359,11 @@
     });
 
     const pieces = Layout.build(
-      stops.map((g) => {
-        const img = g.rep ? state.imgs.get(g.rep.idx) : null;
+      list.map(({ r, weight }) => {
+        const img = state.imgs.get(r.idx);
         return {
-          id: g.id, lat: g.lat, lng: g.lng, takenAt: g.start,
-          weight: g.count, aspect: img ? img.width / img.height : 1
+          id: String(r.idx), lat: r.lat, lng: r.lng, takenAt: r.takenAt,
+          weight, aspect: img ? img.width / img.height : 1
         };
       }),
       proj.project, W, H,
@@ -335,8 +376,7 @@
       }
     );
     pieces.forEach((p, i) => {
-      const g = stops[i];
-      p.img = g && g.rep ? state.imgs.get(g.rep.idx) : null;
+      p.img = state.imgs.get(list[i].r.idx) || null;
     });
 
     const track = Trips.simplify(trackPts.map((r) => proj.project(r.lng, r.lat)), 0.9);
@@ -351,7 +391,7 @@
       footer: s.showFooter
         ? ('fotos-recorrido · ' + (base ? MapView.ATTRIB : '© OpenStreetMap contributors'))
         : '',
-      strain: Layout.strain(pieces, proj.pxPerKm(stops.length ? stops[0].lat : 0))
+      strain: Layout.strain(pieces, proj.pxPerKm(list.length ? list[0].r.lat : 0))
     };
   }
 
@@ -529,16 +569,16 @@
     busy(true, 'Guardando…');
     try {
       const pieces = [];
-      for (const g of activeStops()) {
-        const img = g.rep ? state.imgs.get(g.rep.idx) : null;
+      for (const { r, weight } of piecePhotos()) {
+        const img = state.imgs.get(r.idx);
         let blob = null;
         if (img) {
           const small = downscale(img, STORE_PX);
-          blob = await new Promise((r) => small.toBlob(r, 'image/jpeg', 0.82));
+          blob = await new Promise((res) => small.toBlob(res, 'image/jpeg', 0.82));
         }
         pieces.push({
-          id: g.id, lat: g.lat, lng: g.lng, start: g.start, count: g.count,
-          name: (g.rep && g.rep.name) || '', idx: (g.rep && g.rep.idx) || null, blob
+          id: String(r.idx), lat: r.lat, lng: r.lng, start: r.takenAt, count: weight,
+          name: r.name || '', idx: r.idx, blob
         });
       }
       const doc = {
@@ -576,11 +616,18 @@
         end: photos.length ? photos[photos.length - 1].takenAt : 0,
         restored: doc.label || ''
       };
-      state.stops = (doc.pieces || []).map((p) => ({
-        id: p.id, lat: p.lat, lng: p.lng, start: p.start, end: p.start,
-        count: p.count || 1, minutes: 0,
-        rep: { idx: p.idx || p.id, name: p.name }
-      }));
+      // El tope de piezas es de fotos, no de paradas; si el proyecto guardado
+      // trae más piezas que el tope restaurado (settings antiguos, o menos
+      // de las que de verdad se guardaron), no hay que recortarlo al abrirlo.
+      s.pieces = Math.min(MAX_PIECES, Math.max(s.pieces || 0, (doc.pieces || []).length));
+      state.stops = (doc.pieces || []).map((p) => {
+        const rep = { idx: p.idx || p.id, lat: p.lat, lng: p.lng, takenAt: p.start, name: p.name };
+        return {
+          id: p.id, lat: p.lat, lng: p.lng, start: p.start, end: p.start,
+          count: p.count || 1, minutes: 0,
+          rep, photos: [rep]
+        };
+      });
       for (const p of doc.pieces || []) {
         if (!p.blob) continue;
         try {
@@ -674,6 +721,7 @@
     put('inGrime', Math.round(s.grime * 100));
     put('inShadow', Math.round(s.shadow * 100));
     put('inMap', Math.round(s.mapStrength * 100));
+    put('inMapStain', Math.round(s.mapStain * 100));
     $('inGroup').value = String(RADII.indexOf(s.groupRadiusM) >= 0 ? RADII.indexOf(s.groupRadiusM) : 4);
     $('inGroupVal').textContent = fmtM(s.groupRadiusM);
   }
@@ -754,6 +802,7 @@
     check('inMarks', (v) => { s.marks = v; });
     check('inFrame', (v) => { s.frame = v; });
     range('inMap', (v) => { s.mapStrength = v / 100; }, (v) => v + '%');
+    range('inMapStain', (v) => { s.mapStain = v / 100; }, (v) => v + '%');
     check('inMapLabels', (v) => { s.mapLabels = v; });
 
     // Estos dos sí rehacen las paradas, que es caro: van al soltar, no al mover.
