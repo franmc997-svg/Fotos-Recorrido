@@ -2,6 +2,7 @@
    Sin dependencias:  node tests/collage.test.js  */
 const Project = require('../collage/js/project.js');
 const Layout = require('../collage/js/layout.js');
+const Video = require('../collage/js/video.js');
 
 let fallos = 0;
 function comprobar(nombre, ok, detalle) {
@@ -342,6 +343,100 @@ console.log('\nHuecos de la lámina');
 
   comprobar('una densidad mínima deja al menos una pieza',
     Layout.grid(fotos, proj.project, W, H, Object.assign({ density: 0.001 }, opts)).length >= 1);
+}
+
+
+console.log('\nLínea de tiempo del vídeo');
+{
+  const pl = Video.plan(20, { duracion: 15, cierre: 1.6, entrada: 0.45 });
+
+  comprobar('el montaje acaba donde empieza el cierre',
+    Math.abs(pl.montaje - (15 - 1.6)) < 1e-9, pl.montaje);
+  comprobar('las fotos entran en orden',
+    pl.inicio.every((v, i) => i === 0 || v >= pl.inicio[i - 1]));
+  comprobar('la primera foto arranca en el segundo cero', pl.inicio[0] === 0);
+
+  /* El fallo fácil: repartir las fotos hasta el final del montaje, con lo que
+     la última empieza a aparecer justo cuando ya no queda tiempo y la lámina
+     se completa de golpe durante el cierre. */
+  comprobar('la última acaba de entrar justo al cerrar el montaje',
+    Math.abs((pl.inicio[19] + pl.entrada) - pl.montaje) < 1e-9,
+    `${(pl.inicio[19] + pl.entrada).toFixed(3)} vs ${pl.montaje}`);
+
+  const fin = Video.estado(pl, pl.duracion);
+  comprobar('al terminar están todas puestas y ninguna entrando',
+    fin.firmes === 20 && fin.vuelo.length === 0 && fin.traza === 1);
+  comprobar('al empezar el cierre ya está todo puesto',
+    Video.estado(pl, pl.montaje).firmes === 20);
+
+  const arranque = Video.estado(pl, 0);
+  comprobar('en el segundo cero no hay nada puesto',
+    arranque.firmes === 0 && arranque.vuelo.length === 0, JSON.stringify(arranque.vuelo));
+
+  // Recorrido completo: ninguna foto puede desaparecer ni adelantarse.
+  let coherente = true, retrocede = false, previo = 0;
+  for (let t = 0; t <= pl.duracion; t += 0.05) {
+    const st = Video.estado(pl, t);
+    if (st.firmes < previo) retrocede = true;
+    previo = st.firmes;
+    for (const v of st.vuelo) {
+      if (v.i < st.firmes) coherente = false;            // ya asentada y aún en vuelo
+      if (v.alpha <= 0 || v.alpha > 1) coherente = false;
+      if (t < pl.inicio[v.i]) coherente = false;         // entrando antes de su hora
+    }
+  }
+  comprobar('las fotos nunca desaparecen una vez puestas', !retrocede);
+  comprobar('las que están entrando lo hacen a su hora y con opacidad válida', coherente);
+
+  comprobar('con una sola foto no revienta',
+    Video.estado(Video.plan(1, { duracion: 8 }), 8).firmes === 1);
+  comprobar('sin fotos tampoco',
+    Video.estado(Video.plan(0, { duracion: 8 }), 8).firmes === 0);
+
+  // Un cierre absurdo no puede dejar el montaje en cero: las fotos no tendrían
+  // ningún hueco donde entrar.
+  const apretado = Video.plan(10, { duracion: 10, cierre: 99 });
+  comprobar('un cierre exagerado se recorta y deja montaje',
+    apretado.montaje > 0 && apretado.cierre <= 10 * 0.4,
+    `montaje ${apretado.montaje}, cierre ${apretado.cierre}`);
+  comprobar('y aun así todas entran antes de acabar',
+    Video.estado(apretado, apretado.duracion).firmes === 10);
+}
+
+console.log('\nEncuadre del vídeo');
+{
+  const W = 1200, H = 1800;
+  const pl = Video.plan(12, { duracion: 12, cierre: 1.5 });
+  const foco = [180, 240];
+
+  const fin = Video.camara(pl, pl.duracion, W, H, 1.4, foco);
+  comprobar('acaba enseñando la lámina entera',
+    Math.abs(fin.sw - W) < 1e-6 && Math.abs(fin.sh - H) < 1e-6
+      && fin.sx === 0 && fin.sy === 0, JSON.stringify(fin));
+
+  const ini = Video.camara(pl, 0, W, H, 1.4, foco);
+  comprobar('arranca cerrada al zoom pedido',
+    Math.abs(ini.sw - W / 1.4) < 1e-6, ini.sw);
+
+  /* El recorte tiene que caber dentro de la lámina: si se sale, drawImage
+     rellena con transparencia y el vídeo abre con una banda vacía. El foco
+     está pegado a una esquina justamente para forzarlo. */
+  let dentro = true, crece = true, previo = 0;
+  for (let t = 0; t <= pl.duracion; t += 0.05) {
+    const c = Video.camara(pl, t, W, H, 1.4, foco);
+    if (c.sx < -1e-9 || c.sy < -1e-9 || c.sx + c.sw > W + 1e-9 || c.sy + c.sh > H + 1e-9) dentro = false;
+    if (c.sw < previo - 1e-9) crece = false;
+    previo = c.sw;
+  }
+  comprobar('el encuadre nunca se sale de la lámina', dentro);
+  comprobar('y sólo se abre, nunca se vuelve a cerrar', crece);
+
+  const sin = Video.camara(pl, 3, W, H, 1, foco);
+  comprobar('sin zoom el encuadre es la lámina entera desde el principio',
+    sin.sx === 0 && sin.sy === 0 && sin.sw === W && sin.sh === H);
+
+  comprobar('la proporción del recorte es la de la lámina',
+    Math.abs((ini.sw / ini.sh) - (W / H)) < 1e-9);
 }
 
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');

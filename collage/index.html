@@ -25,6 +25,7 @@
   </div>
   <div class="topbar-actions">
     <a class="btn ghost" href="index.html">← Herramienta de mapas</a>
+    <button id="btnVideo" class="btn ghost" disabled>Vídeo</button>
     <button id="btnExport" class="btn primary" disabled>Descargar imagen</button>
   </div>
 </header>
@@ -329,7 +330,45 @@
   </form>
 </dialog>
 
-<div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Trabajando…</span></div>
+<dialog id="videoDlg" class="dlg">
+  <form method="dialog">
+    <h3>Vídeo del recorrido</h3>
+    <p class="tiny muted">Las fotos entran por orden de reloj de la cámara y la traza
+      se dibuja con ellas, hasta que el encuadre se abre y cabe todo el recorrido.</p>
+    <div class="field">
+      <label for="vidDur">Duración</label>
+      <input type="range" id="vidDur" min="6" max="40" step="1" value="15">
+      <output id="vidDurOut">15 s</output>
+    </div>
+    <div class="field">
+      <label for="vidSize">Tamaño</label>
+      <select id="vidSize">
+        <option value="1280">Rápido (lado largo 1280)</option>
+        <option value="1920" selected>Móvil (lado largo 1920)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="vidFps">Fotogramas</label>
+      <select id="vidFps">
+        <option value="24">24 por segundo (cine)</option>
+        <option value="30" selected>30 por segundo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="vidZoom">Zoom de entrada</label>
+      <input type="range" id="vidZoom" min="100" max="180" step="5" value="125">
+      <output id="vidZoomOut">125%</output>
+    </div>
+    <p id="vidNota" class="tiny muted"></p>
+    <menu>
+      <button value="cancel" class="btn ghost">Cancelar</button>
+      <button id="vidGo" value="ok" class="btn primary">Grabar</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="busy" class="busy" hidden><div class="spinner"></div><span id="busyText">Trabajando…</span>
+  <button id="btnCancelVid" class="btn ghost" hidden>Cancelar</button></div>
 
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/exifr.umd.js"></script>
@@ -345,6 +384,7 @@
 <script src="collage/js/paper.js"></script>
 <script src="collage/js/basemap.js"></script>
 <script src="collage/js/render.js"></script>
+<script src="collage/js/video.js"></script>
 <script src="collage/js/store.js"></script>
 <script src="collage/js/app.js"></script>
 </body>

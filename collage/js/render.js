@@ -14,6 +14,8 @@
   // al exportar se rehacen a resolución alta, que es lo que se quiere.
   const cache = new Map();
   const MAX_CACHE = 260;
+  const SEED = 20260918;
+
   function cacheGet(key, make) {
     let v = cache.get(key);
     if (v) return v;
@@ -329,30 +331,55 @@
      funde con lo que ya hay pintado, que es la vecina. El interior de la nube
      queda continuo y solo el contorno exterior se desvanece contra el papel,
      que es exactamente lo que hace que las fotos pinten el mapa. */
-  function paintLayer(W, H, model, s) {
+  function lienzo(W, H) {
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
-    /* En la lámina de atlas la pieza es el recorte exacto de la celda: ni
-       borde rasgado ni giro ni sombra. Lo que se lee ahí es la retícula, y
-       basta con que una pieza sobresalga un milímetro para romperla. */
+    return c;
+  }
+
+  /* Parche de una pieza, cacheado.
+
+     En la lámina de atlas la pieza es el recorte exacto de la celda: ni borde
+     rasgado ni giro ni sombra. Lo que se lee ahí es la retícula, y basta con
+     que una pieza sobresalga un milímetro para romperla.
+
+     Con `rev` sale ya revelado. El vídeo lo pide así para revelar cada foto
+     una sola vez en lugar de repasar el compuesto en cada fotograma. */
+  function parcheDe(p, s, rev) {
     const atlas = s.layout === 'atlas';
     const ps = atlas ? Object.assign({}, s, { shape: 'recorte' }) : s;
+    const marca = rev ? `|r${rev.duotone}_${rev.contrast}_${rev.brightness}_${rev.ink}` : '';
+    const key = `${p.id}|${ps.shape}|${Math.round(p.w)}x${Math.round(p.h)}`
+      + `|${s.bleed.toFixed(2)}${marca}`;
+    return cacheGet(key, () => {
+      const c = makePatch(p, ps, p.w, p.h);
+      if (rev) Paper.develop(c.getContext('2d'), c.width, c.height, rev);
+      return c;
+    });
+  }
+
+  function dibujarPieza(ctx, p, patch, s, W, alpha, escala) {
+    const atlas = s.layout === 'atlas';
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    if (!atlas) ctx.rotate(p.rot * (s.rotation ? 1 : 0));
+    if (escala != null && escala !== 1) ctx.scale(escala, escala);
+    ctx.globalAlpha = s.pieceAlpha * (alpha == null ? 1 : alpha);
+    if (!atlas && s.shadow > 0 && s.shape !== 'mancha') {
+      ctx.shadowColor = `rgba(0,0,0,${0.35 * s.shadow})`;
+      ctx.shadowBlur = W * 0.008 * s.shadow;
+      ctx.shadowOffsetY = W * 0.002 * s.shadow;
+    }
+    ctx.drawImage(patch, -patch.width / 2, -patch.height / 2);
+    ctx.restore();
+  }
+
+  function paintLayer(W, H, model, s) {
+    const c = lienzo(W, H);
+    const ctx = c.getContext('2d');
     for (const p of model.pieces) {
       if (!p.img) continue;
-      const key = `${p.id}|${ps.shape}|${Math.round(p.w)}x${Math.round(p.h)}|${s.bleed.toFixed(2)}`;
-      const patch = cacheGet(key, () => makePatch(p, ps, p.w, p.h));
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      if (!atlas) ctx.rotate(p.rot * (s.rotation ? 1 : 0));
-      ctx.globalAlpha = s.pieceAlpha;
-      if (!atlas && s.shadow > 0 && s.shape !== 'mancha') {
-        ctx.shadowColor = `rgba(0,0,0,${0.35 * s.shadow})`;
-        ctx.shadowBlur = W * 0.008 * s.shadow;
-        ctx.shadowOffsetY = W * 0.002 * s.shadow;
-      }
-      ctx.drawImage(patch, -patch.width / 2, -patch.height / 2);
-      ctx.restore();
+      dibujarPieza(ctx, p, parcheDe(p, s, null), s, W);
     }
     return c;
   }
@@ -443,10 +470,16 @@
      lo contrario: encima, en un viaje que va y vuelve por la misma ciudad, se
      convierte en una maraña de líneas cruzadas que tapa el collage. Por debajo
      asoma entre las fotos y se lee como una costura. */
-  function thread(ctx, model, s, ink, W) {
+  /* Los tramos del hilo, sin dibujarlos.
+
+     El umbral de "salto largo" sale de la mediana de TODOS los saltos, así que
+     hay que calcularlo una vez sobre el recorrido entero: si el vídeo lo
+     recalculara con las fotos que lleva puestas, el hilo iría cambiando de
+     idea sobre qué tramos merecen dibujarse según avanza. */
+  function hiloTramos(model, s, W) {
     const pts = model.route;
-    if (!pts || pts.length < 2) return;
     const w = Math.max(1, W * 0.0026 * s.routeWidth);
+    if (!pts || pts.length < 2) return { tramos: [], nudos: [], w };
 
     /* Dentro de una misma ciudad las fotos consecutivas en el tiempo están
        desperdigadas, así que unirlas todas en orden cronológico dibuja una
@@ -469,16 +502,20 @@
       min = Math.max(W * 0.05, med * 1.55);
     }
     const tramos = [];
-    let cur = [pts[0]];
     for (let i = 1; i < pts.length; i++) {
       const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      if (d < min) { cur = [pts[i]]; continue; }
-      cur.push(pts[i]);
-      if (cur.length === 2) { tramos.push(cur); cur = [pts[i]]; }
+      if (d >= min) tramos.push({ a: pts[i - 1], b: pts[i], desde: i - 1, hasta: i });
     }
-    for (const t of tramos) {
-      polyline(ctx, t, ink.accent, w, s.routeAbove ? 0.8 : 1,
-        s.routeDashed ? [w * 2.6, w * 2.2] : null);
+    return { tramos, nudos: pts, w };
+  }
+
+  /* Dibuja el hilo. `visible` es opcional: una función que dice si la pieza de
+     ese índice ya está puesta, para que en el vídeo el hilo crezca con ellas. */
+  function hiloPintar(ctx, h, s, ink, visible) {
+    for (const t of h.tramos) {
+      if (visible && !(visible(t.desde) && visible(t.hasta))) continue;
+      polyline(ctx, [t.a, t.b], ink.accent, h.w, s.routeAbove ? 0.8 : 1,
+        s.routeDashed ? [h.w * 2.6, h.w * 2.2] : null);
     }
 
     // Los nudos sí van en todas las piezas: marcan dónde estuviste aunque el
@@ -486,11 +523,37 @@
     ctx.save();
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = ink.accent;
-    for (const pt of pts) {
+    h.nudos.forEach((pt, i) => {
+      if (visible && !visible(i)) return;
       ctx.beginPath();
-      ctx.arc(pt[0], pt[1], w * 1.2, 0, 6.2832);
+      ctx.arc(pt[0], pt[1], h.w * 1.2, 0, 6.2832);
       ctx.fill();
-    }
+    });
+    ctx.restore();
+  }
+
+  function thread(ctx, model, s, ink, W) {
+    hiloPintar(ctx, hiloTramos(model, s, W), s, ink, null);
+  }
+
+  function numerado(ctx, W, H, model, s, ink, visible) {
+    if (!s.numbered) return;
+    const u = W / 100;
+    ctx.save();
+    ctx.font = `400 ${1.5 * u}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    model.pieces.forEach((p, i) => {
+      if (visible && !visible(i)) return;
+      const x = p.x + p.w * 0.36, y = p.y + p.h * 0.36;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = ink.paper;
+      ctx.beginPath();
+      ctx.arc(x, y, 1.35 * u, 0, 6.2832);
+      ctx.fill();
+      ctx.fillStyle = ink.ink;
+      ctx.fillText(String(i + 1), x, y + 0.08 * u);
+    });
     ctx.restore();
   }
 
@@ -540,7 +603,7 @@
       Paper.develop(ctx, W, H, {
         paper: ink.paper, ink: ink.ink,
         duotone: s.duotone, contrast: s.contrast, brightness: s.brightness,
-        grain: 0, seed: 20260918
+        grain: 0, seed: SEED
       });
     }
 
@@ -560,24 +623,7 @@
     // recortes al mismo sistema en vez de dejarlos flotando sobre el papel.
     reticula(ctx, W, H, ink, s, 0.16);
 
-    if (s.numbered) {
-      const u = W / 100;
-      ctx.save();
-      ctx.font = `400 ${1.5 * u}px ${MONO}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      model.pieces.forEach((p, i) => {
-        const x = p.x + p.w * 0.36, y = p.y + p.h * 0.36;
-        ctx.globalAlpha = 0.92;
-        ctx.fillStyle = ink.paper;
-        ctx.beginPath();
-        ctx.arc(x, y, 1.35 * u, 0, 6.2832);
-        ctx.fill();
-        ctx.fillStyle = ink.ink;
-        ctx.fillText(String(i + 1), x, y + 0.08 * u);
-      });
-      ctx.restore();
-    }
+    numerado(ctx, W, H, model, s, ink, null);
 
     textBlock(ctx, W, H, model, s, ink);
 
@@ -591,10 +637,10 @@
        pasada los recortes se notan pegados, como un montaje digital. */
     Paper.develop(ctx, W, H, fondoAparte
       ? { paper: ink.paper, ink: ink.ink, duotone: 0, contrast: 1, brightness: 0,
-          grain: s.grain * 0.7, seed: 20260918 }
+          grain: s.grain * 0.7, seed: SEED }
       : { paper: ink.paper, ink: ink.ink,
           duotone: s.duotone, contrast: s.contrast, brightness: s.brightness,
-          grain: s.grain, seed: 20260918 });
+          grain: s.grain, seed: SEED });
     Paper.grime(ctx, W, H, { grime: s.grime });
     cartouche(ctx, W, H, ink, s, model);
     marks(ctx, W, H, ink, s.marks);
@@ -602,5 +648,124 @@
     ctx.restore();
   }
 
-  window.Render = { render, clearCache, MONO, SERIF };
+
+  function revelarInk(ink, rev) {
+    const out = {};
+    for (const k in ink) {
+      out[k] = (typeof ink[k] === 'string' && ink[k][0] === '#')
+        ? Paper.revelarColor(ink[k], rev) : ink[k];
+    }
+    return out;
+  }
+
+  /* Recorta una polilínea a una fracción de su longitud en puntos, con el
+     último tramo a medias para que el trazo avance liso y no a saltos. */
+  function recortar(pts, frac) {
+    if (!pts || pts.length < 2) return pts || [];
+    const f = frac < 0 ? 0 : frac > 1 ? 1 : frac;
+    if (f >= 1) return pts;
+    const n = (pts.length - 1) * f;
+    const k = Math.floor(n);
+    const out = pts.slice(0, k + 1);
+    const r = n - k;
+    if (r > 0 && pts[k + 1]) {
+      out.push([pts[k][0] + (pts[k + 1][0] - pts[k][0]) * r,
+                pts[k][1] + (pts[k + 1][1] - pts[k][1]) * r]);
+    }
+    return out;
+  }
+
+  /* Escena por capas, para el vídeo.
+
+     Un render completo de la lámina cuesta cerca de dos segundos a 1080x1920;
+     repetirlo por fotograma no es una opción. Aquí se paga una sola vez todo
+     lo que no cambia —papel, mapa, manchas, adornos, grano— y el fotograma se
+     queda en pegar lienzos, que sale por centésimas de milisegundo.
+
+     Lo que sí se mueve se dibuja con la tinta ya revelada. Eso da exactamente
+     el mismo color que revelar el compuesto al final, porque el duotono es una
+     función afín y las funciones afines conmutan con la mezcla alfa. La única
+     excepción es el modo de sobreimpresión 'multiply', que no es afín: ahí la
+     lámina y el vídeo se separan un poco. */
+  function escena(W, H, model, s) {
+    const ink = window.INKS[s.ink] || window.INKS.cianotipo;
+    const fondoAparte = s.duotoneScope === 'fondo';
+    const rev = { paper: ink.paper, ink: ink.ink, duotone: s.duotone,
+      contrast: s.contrast, brightness: s.brightness, grain: 0, seed: SEED };
+    /* A las fotos y a los adornos de encima el duotono solo les llega cuando
+       el revelado es de la lámina entera. Con el revelado de fondo la foto
+       conserva su color, que es lo que distingue a la lámina de atlas. */
+    const revEncima = fondoAparte ? null : rev;
+    const tintaFondo = revelarInk(ink, rev);
+    const tintaEncima = fondoAparte ? ink : tintaFondo;
+
+    const fondo = lienzo(W, H);
+    const f = fondo.getContext('2d');
+    Paper.base(f, W, H, { paper: ink.paper, ink: ink.ink, texture: s.texture });
+    if (model.base && s.mapStrength > 0) {
+      f.save();
+      f.globalAlpha = Math.min(1, s.mapStrength);
+      f.drawImage(model.base, 0, 0, W, H);
+      f.restore();
+    }
+    /* Las manchas se quedan en el fondo en vez de entrar con su foto: se pegan
+       con 'multiply', que no es afín, así que sacarlas de aquí les cambiaría
+       el color. El mapa arranca ya teñido por donde pasaste y las fotos van
+       cayendo encima, que además se lee bien. */
+    mapStains(f, W, H, model, s, ink);
+    reticula(f, W, H, ink, s, 0.5);
+    Paper.develop(f, W, H, rev);
+
+    // Adornos de encima que no dependen de cuántas fotos haya puestas.
+    const frente = lienzo(W, H);
+    const fr = frente.getContext('2d');
+    reticula(fr, W, H, tintaEncima, s, 0.16);
+    textBlock(fr, W, H, model, s, tintaEncima);
+    frame(fr, W, H, tintaEncima, s);
+
+    // Lo que en la lámina va después del revelado y por tanto sin revelar.
+    const acabado = lienzo(W, H);
+    const ac = acabado.getContext('2d');
+    Paper.grime(ac, W, H, { grime: s.grime });
+    cartouche(ac, W, H, ink, s, model);
+    marks(ac, W, H, ink, s.marks);
+
+    const grano = Paper.granoCapas(W, H, fondoAparte ? s.grain * 0.7 : s.grain, SEED);
+    const hilo = hiloTramos(model, s, W);
+
+    /* El orden de entrada es el del reloj de la cámara, no el del montaje: de
+       eso va el vídeo. El índice de montaje se guarda aparte porque el hilo y
+       la numeración están escritos en ese otro orden. */
+    model.pieces.forEach((p, i) => { p.ruta = i; });
+    const piezas = model.pieces.filter((p) => p.img).slice()
+      .sort((a, b) => ((a.photo && a.photo.takenAt) || 0) - ((b.photo && b.photo.takenAt) || 0)
+        || a.ruta - b.ruta);
+    const parches = piezas.map((p) => parcheDe(p, s, revEncima));
+
+    return {
+      W, H, fondo, frente, acabado, grano, piezas,
+      filtro: (fondoAparte && s.photoColor !== 1)
+        ? `saturate(${Math.max(0, s.photoColor)})` : null,
+      mezcla: s.blend === 'multiply' ? 'multiply' : 'source-over',
+
+      traza(ctx, frac) {
+        const pts = recortar(model.track, frac);
+        halo(ctx, pts, tintaFondo.mid, W, s.halo);
+        if (s.showTrack) {
+          polyline(ctx, pts, tintaFondo.accent,
+            Math.max(1, W * 0.0026 * s.trackWidth), 0.75 * s.trackOpacity);
+        }
+      },
+      hilo(ctx, visible, arriba) {
+        if (!s.showRoute || !!s.routeAbove !== !!arriba) return;
+        hiloPintar(ctx, hilo, s, arriba ? tintaEncima : tintaFondo, visible);
+      },
+      numeros(ctx, visible) { numerado(ctx, W, H, model, s, tintaEncima, visible); },
+      pieza(ctx, i, alpha, escala) {
+        dibujarPieza(ctx, piezas[i], parches[i], s, W, alpha, escala);
+      }
+    };
+  }
+
+  window.Render = { render, escena, clearCache, MONO, SERIF };
 })();

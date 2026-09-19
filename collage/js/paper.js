@@ -152,5 +152,75 @@
     return `rgba(${r},${g},${b},${a})`;
   }
 
-  window.Paper = { base, develop, grime, mottle, rnd, hex, rgba };
+
+  /* El mismo revelado, aplicado a un color suelto.
+
+     El duotono es afín: la luminancia es una combinación lineal de los
+     canales, la rampa tinta→papel es lineal en la luminancia y la mezcla
+     final es un lerp. Una función afín conmuta con la mezcla alfa, así que
+     revelar el fondo y revelar cada foto por separado da exactamente lo mismo
+     que revelar el compuesto. Eso es lo que permite al vídeo precocinar las
+     capas una vez en vez de repasar millones de píxeles en cada fotograma. */
+  function revelarColor(color, o) {
+    if (!o || (o.duotone <= 0 && o.contrast === 1 && !o.brightness)) return color;
+    const [R, G, B] = hex(color);
+    const [pr, pg, pb] = hex(o.paper);
+    const [ir, ig, ib] = hex(o.ink);
+    const k = o.duotone;
+    let lum = (0.2126 * R + 0.7152 * G + 0.0722 * B) / 255;
+    lum = (lum - 0.5) * o.contrast + 0.5 + (o.brightness || 0);
+    if (lum < 0) lum = 0; else if (lum > 1) lum = 1;
+    const ch = (X, iv, pv) => {
+      const n = X + ((iv + (pv - iv) * lum) - X) * k;
+      return Math.round(n < 0 ? 0 : n > 255 ? 255 : n);
+    };
+    return '#' + [ch(R, ir, pr), ch(G, ig, pg), ch(B, ib, pb)]
+      .map((v) => v.toString(16).padStart(2, '0')).join('');
+  }
+
+  /* Grano como dos lienzos en vez de una pasada de píxeles.
+
+     El grano de la lámina usa siempre la misma semilla, así que es idéntico en
+     todos los fotogramas: calcularlo una vez y pegarlo es más rápido y además
+     evita que hierva por la pantalla. Hacen falta dos porque el canvas no
+     tiene una mezcla que reste: el ruido positivo se suma con 'lighter' y el
+     negativo se quita con 'difference', que resta mientras el fondo sea más
+     claro que el ruido —con grano moderado, en casi todo el papel. */
+  function granoCapas(W, H, grain, seed) {
+    if (!(grain > 0)) return null;
+    const g = grain * 255;
+    const mk = () => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      return c;
+    };
+    const mas = mk(), menos = mk();
+    const cm = mas.getContext('2d'), cn = menos.getContext('2d');
+    const im = cm.createImageData(W, H), inn = cn.createImageData(W, H);
+    const a = im.data, b = inn.data;
+    const r = rnd(seed || 1234567);
+    for (let i = 0; i < a.length; i += 4) {
+      const n = (r() - 0.5) * g;
+      const v = n > 0 ? n : 0, w = n < 0 ? -n : 0;
+      a[i] = a[i + 1] = a[i + 2] = v; a[i + 3] = 255;
+      b[i] = b[i + 1] = b[i + 2] = w; b[i + 3] = 255;
+    }
+    cm.putImageData(im, 0, 0);
+    cn.putImageData(inn, 0, 0);
+    return { mas, menos };
+  }
+
+  /* Pega el grano ya calculado sobre el compuesto del fotograma. */
+  function granoPegar(ctx, W, H, capas) {
+    if (!capas) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(capas.mas, 0, 0, W, H);
+    ctx.globalCompositeOperation = 'difference';
+    ctx.drawImage(capas.menos, 0, 0, W, H);
+    ctx.restore();
+  }
+
+  window.Paper = { base, develop, grime, mottle, rnd, hex, rgba,
+    revelarColor, granoCapas, granoPegar };
 })();

@@ -550,6 +550,7 @@
     const has = state.trip && activeStops().length;
     $('stageEmpty').hidden = !!has;
     $('btnExport').disabled = !has;
+    $('btnVideo').disabled = !has;
     $('btnSave').disabled = !has;
     if (!has) {
       const ctx = cv.getContext('2d');
@@ -597,6 +598,13 @@
   }
 
   /* ---------------- exportación ---------------- */
+  /* Nombre de fichero a partir del título, sin acentos ni espacios. */
+  function nombreArchivo() {
+    return (s.title || 'collage').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collage';
+  }
+
   async function exportImage() {
     const scale = Number($('exQuality').value) || 2;
     const fmt = $('exFormat').value === 'jpeg' ? 'jpeg' : 'png';
@@ -621,9 +629,7 @@
       const blob = await new Promise((res) =>
         cv.toBlob(res, fmt === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92));
       if (!blob) throw new Error('blob');
-      const name = (s.title || 'collage').toLowerCase()
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collage';
+      const name = nombreArchivo();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${name}-${w}x${h}.${fmt === 'jpeg' ? 'jpg' : 'png'}`;
@@ -635,6 +641,77 @@
     } finally {
       // La caché guarda piezas a resolución de exportación: si se queda, la
       // vista previa siguiente arrastra cientos de megas de más.
+      Render.clearCache();
+      busy(false);
+      draw();
+    }
+  }
+
+  /* Vídeo del collage armándose.
+
+     El mapa se pide al tamaño de la lámina y no al del vídeo: cuando el
+     encuadre está cerrado del todo se ve a píxel, y ampliar una captura de
+     mapa se nota mucho más que ampliar una foto. */
+  async function exportVideo() {
+    const largo = Number($('vidSize').value) || 1920;
+    const a = window.ASPECTS[s.aspect] || window.ASPECTS['2:3'];
+    const k = largo / Math.max(a.w, a.h);
+    // Los codificadores quieren lados pares; con impares algunos fallan y
+    // otros recortan una fila sin avisar.
+    const par = (v) => Math.max(2, Math.round(v * k / 2) * 2);
+    const ancho = par(a.w), alto = par(a.h);
+    const zoom = (Number($('vidZoom').value) || 125) / 100;
+    const duracion = Number($('vidDur').value) || 15;
+    const fps = Number($('vidFps').value) || 30;
+    const W = Math.round(ancho * zoom), H = Math.round(alto * zoom);
+
+    let cancelado = false;
+    const btn = $('btnCancelVid');
+    btn.hidden = false;
+    btn.onclick = () => { cancelado = true; };
+    busy(true, 'Montando la lámina…');
+    try {
+      await new Promise((r) => setTimeout(r, 30));
+      let base = null;
+      if (s.mapStrength && Basemap.available) {
+        busy(true, 'Trayendo el mapa…');
+        base = await Basemap.capture({ W, H, fit: buildModel(W, H, null).proj,
+          ink: inkOf(), labels: s.mapLabels, wire: s.mapWire });
+      }
+      busy(true, 'Montando la lámina…');
+      const peli = Video.pelicula({ ancho, alto, zoom, duracion, fps,
+        model: buildModel(W, H, base), s });
+
+      const stage = $('stage');
+      const sctx = stage.getContext('2d');
+      const r = await Video.grabar(peli, {
+        fps,
+        cancelado: () => cancelado,
+        progreso: (f) => busy(true, `Grabando… ${Math.round(f * 100)}%`),
+        vista: (cv) => sctx.drawImage(cv, 0, 0, stage.width, stage.height)
+      });
+      if (cancelado) { banner('Vídeo cancelado.', 'warn'); return; }
+
+      const enlace = document.createElement('a');
+      enlace.href = URL.createObjectURL(r.blob);
+      enlace.download = `${nombreArchivo()}-${ancho}x${alto}.${r.extension}`;
+      enlace.click();
+      setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
+
+      const mb = (r.blob.size / 1048576).toFixed(1);
+      banner(r.extension === 'mp4'
+        ? `Vídeo listo: MP4, ${ancho}×${alto}, ${duracion} s, ${mb} MB.`
+        : `Vídeo listo: WebM, ${ancho}×${alto}, ${duracion} s, ${mb} MB. `
+          + 'Este navegador no sabe grabar MP4; WebM no se sube bien a Instagram '
+          + 'ni se reproduce en todos los móviles. Con Chrome o Safari sale MP4.',
+        r.extension === 'mp4' ? 'ok' : 'warn', r.extension !== 'mp4');
+    } catch (e) {
+      banner('No pude generar el vídeo: ' + e.message, 'error', true);
+    } finally {
+      btn.hidden = true;
+      btn.onclick = null;
+      // La caché guarda parches al tamaño del vídeo; si se queda, la vista
+      // previa siguiente arrastra cientos de megas de más.
       Render.clearCache();
       busy(false);
       draw();
@@ -953,6 +1030,26 @@
     };
     $('exportDlg').addEventListener('close', () => {
       if ($('exportDlg').returnValue === 'ok') exportImage();
+    });
+
+    const vidNota = () => {
+      const mime = Video.mimeSoportado();
+      const dur = Number($('vidDur').value) || 15;
+      $('vidDurOut').textContent = dur + ' s';
+      $('vidZoomOut').textContent = ($('vidZoom').value || 125) + '%';
+      $('vidNota').textContent = !mime
+        ? 'Este navegador no sabe grabar vídeo desde un lienzo.'
+        : (Video.extensionDe(mime) === 'mp4'
+            ? 'Saldrá en MP4. '
+            : 'Este navegador solo graba WebM; para MP4 hace falta Chrome o Safari. ')
+          + `Se graba a tiempo real, así que tardará los ${dur} s del vídeo más `
+          + 'lo que cueste montar la lámina.';
+    };
+    $('btnVideo').onclick = () => { vidNota(); $('videoDlg').showModal(); };
+    $('vidDur').oninput = vidNota;
+    $('vidZoom').oninput = vidNota;
+    $('videoDlg').addEventListener('close', () => {
+      if ($('videoDlg').returnValue === 'ok') exportVideo();
     });
 
     $('btnDropFar').onclick = () => {
