@@ -333,15 +333,20 @@
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
     const ctx = c.getContext('2d');
+    /* En la lámina de atlas la pieza es el recorte exacto de la celda: ni
+       borde rasgado ni giro ni sombra. Lo que se lee ahí es la retícula, y
+       basta con que una pieza sobresalga un milímetro para romperla. */
+    const atlas = s.layout === 'atlas';
+    const ps = atlas ? Object.assign({}, s, { shape: 'recorte' }) : s;
     for (const p of model.pieces) {
       if (!p.img) continue;
-      const key = `${p.id}|${s.shape}|${Math.round(p.w)}x${Math.round(p.h)}|${s.bleed.toFixed(2)}`;
-      const patch = cacheGet(key, () => makePatch(p, s, p.w, p.h));
+      const key = `${p.id}|${ps.shape}|${Math.round(p.w)}x${Math.round(p.h)}|${s.bleed.toFixed(2)}`;
+      const patch = cacheGet(key, () => makePatch(p, ps, p.w, p.h));
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot * (s.rotation ? 1 : 0));
+      if (!atlas) ctx.rotate(p.rot * (s.rotation ? 1 : 0));
       ctx.globalAlpha = s.pieceAlpha;
-      if (s.shadow > 0 && s.shape !== 'mancha') {
+      if (!atlas && s.shadow > 0 && s.shape !== 'mancha') {
         ctx.shadowColor = `rgba(0,0,0,${0.35 * s.shadow})`;
         ctx.shadowBlur = W * 0.008 * s.shadow;
         ctx.shadowOffsetY = W * 0.002 * s.shadow;
@@ -350,6 +355,88 @@
       ctx.restore();
     }
     return c;
+  }
+
+  /* Retícula de la lámina.
+
+     Es la pieza que convierte un mosaico de fotos en un dibujo: líneas de
+     construcción que siguen por todo el papel, también donde no hay nada. Se
+     dibuja dos veces, antes y después de las fotos. La de debajo es la que se
+     ve en los huecos; la de encima, casi invisible, cruza los recortes y los
+     ata al mismo sistema en vez de dejarlos flotando. */
+  function reticula(ctx, W, H, ink, s, alpha) {
+    if (!s.gridLines || alpha <= 0) return;
+    const g = Layout.gridLines(s.gridCols, W, H);
+    ctx.save();
+    ctx.strokeStyle = ink.mid;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = Math.max(0.5, W / 2600);
+    ctx.beginPath();
+    for (let c = 0; c <= g.cols; c++) {
+      const x = Math.round(c * g.cell) + 0.5;
+      ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    }
+    for (let r = 0; r <= g.rows; r++) {
+      const y = Math.round(r * g.cell) + 0.5;
+      ctx.moveTo(0, y); ctx.lineTo(W, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* Aparato cartográfico: barra de escala, norte y la cruz del sitio. No son
+     adorno; son lo que declara que esto se lee como un plano y no como una
+     página de álbum, y lo que permite medir de un vistazo cuánto abarca. */
+  function cartouche(ctx, W, H, ink, s, model) {
+    if (!s.cartouche) return;
+    const u = W / 100;
+    const m = (s.frame ? 6.4 : 3.2) * u;
+    ctx.save();
+    ctx.strokeStyle = ink.mid;
+    ctx.fillStyle = ink.mid;
+    ctx.lineWidth = Math.max(1, 0.08 * u);
+
+    // Norte: flecha mínima arriba a la derecha.
+    const nx = W - m, ny = m + 2 * u;
+    ctx.beginPath();
+    ctx.moveTo(nx, ny + 2.4 * u);
+    ctx.lineTo(nx, ny - 1.6 * u);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(nx, ny - 2.4 * u);
+    ctx.lineTo(nx - 0.65 * u, ny - 1.1 * u);
+    ctx.lineTo(nx + 0.65 * u, ny - 1.1 * u);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = `400 ${1.2 * u}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('N', nx, ny + 4 * u);
+
+    /* Barra de escala: se elige un número redondo de kilómetros y se mide
+       cuánto ocupa, no al revés. Una barra de "2,37 km" no la lee nadie. */
+    if (model.pxPerKm > 0) {
+      const objetivo = W * 0.16 / model.pxPerKm;      // km que cabrían
+      const pot = Math.pow(10, Math.floor(Math.log10(Math.max(objetivo, 1e-6))));
+      const km = [1, 2, 5, 10].map((n) => n * pot).filter((n) => n <= objetivo * 1.4)
+        .pop() || pot;
+      const len = km * model.pxPerKm;
+      if (isFinite(len) && len > 4 && len < W * 0.5) {
+        /* Arriba a la izquierda, no abajo: abajo está la banda del título y la
+           barra caía justo encima del pie, medio tapada por él. Aquí además
+           hace pareja con el norte de la esquina opuesta. */
+        const bx = m, by = m + 2.4 * u;
+        ctx.beginPath();
+        ctx.moveTo(bx, by - 0.7 * u); ctx.lineTo(bx, by);
+        ctx.lineTo(bx + len, by); ctx.lineTo(bx + len, by - 0.7 * u);
+        ctx.stroke();
+        // Mitad rellena: el truco de siempre para leerla sin regla.
+        ctx.fillRect(bx, by - 0.22 * u, len / 2, 0.22 * u);
+        ctx.font = `400 ${1.15 * u}px ${MONO}`;
+        ctx.textAlign = 'left';
+        ctx.fillText(km >= 1 ? `${km} km` : `${Math.round(km * 1000)} m`, bx, by + 1.8 * u);
+      }
+    }
+    ctx.restore();
   }
 
   /* El hilo que cose las piezas. Va por debajo de la pintura salvo que se pida
@@ -428,6 +515,8 @@
 
     mapStains(ctx, W, H, model, s, ink);
 
+    reticula(ctx, W, H, ink, s, 0.5);
+
     halo(ctx, model.track, ink.mid, W, s.halo);
 
     if (s.showTrack) {
@@ -439,14 +528,37 @@
 
     if (s.showRoute && !s.routeAbove) thread(ctx, model, s, ink, W);
 
+    /* Revelado del fondo, antes de pegar las fotos.
+
+       El duotono lava todo lo que encuentra, y aplicado al final se lleva por
+       delante el color de las fotos: ese es el motivo de que la lámina saliera
+       siempre en sepia. Revelando solo el fondo —papel, mapa y traza— la base
+       queda como un grabado monocromo y los recortes se pegan encima con su
+       color intacto, que es exactamente cómo está hecha una lámina de estas. */
+    const fondoAparte = s.duotoneScope === 'fondo';
+    if (fondoAparte) {
+      Paper.develop(ctx, W, H, {
+        paper: ink.paper, ink: ink.ink,
+        duotone: s.duotone, contrast: s.contrast, brightness: s.brightness,
+        grain: 0, seed: 20260918
+      });
+    }
+
     ctx.save();
     // Sobreimpresión: multiplicar pieza a pieza sobre un lienzo transparente
     // daría negro; lo que se multiplica es la capa entera contra el papel.
     if (s.blend === 'multiply') ctx.globalCompositeOperation = 'multiply';
+    /* La saturación se aplica al componer la capa entera, no píxel a píxel:
+       un filtro de canvas cuesta una fracción y aquí puede haber 260 piezas. */
+    if (fondoAparte && s.photoColor !== 1) ctx.filter = `saturate(${Math.max(0, s.photoColor)})`;
     ctx.drawImage(paintLayer(W, H, model, s), 0, 0);
     ctx.restore();
 
     if (s.showRoute && s.routeAbove) thread(ctx, model, s, ink, W);
+
+    // La retícula vuelve a pasar por encima, ya casi transparente: ata los
+    // recortes al mismo sistema en vez de dejarlos flotando sobre el papel.
+    reticula(ctx, W, H, ink, s, 0.16);
 
     if (s.numbered) {
       const u = W / 100;
@@ -474,12 +586,17 @@
        lisa alrededor de un papel con textura y se nota al instante. */
     frame(ctx, W, H, ink, s);
 
-    Paper.develop(ctx, W, H, {
-      paper: ink.paper, ink: ink.ink,
-      duotone: s.duotone, contrast: s.contrast, brightness: s.brightness,
-      grain: s.grain, seed: 20260918
-    });
+    /* Si el fondo ya se reveló aparte, al final solo pasa el grano: es lo que
+       unifica foto y papel bajo la misma trama de impresión. Sin esta segunda
+       pasada los recortes se notan pegados, como un montaje digital. */
+    Paper.develop(ctx, W, H, fondoAparte
+      ? { paper: ink.paper, ink: ink.ink, duotone: 0, contrast: 1, brightness: 0,
+          grain: s.grain * 0.7, seed: 20260918 }
+      : { paper: ink.paper, ink: ink.ink,
+          duotone: s.duotone, contrast: s.contrast, brightness: s.brightness,
+          grain: s.grain, seed: 20260918 });
     Paper.grime(ctx, W, H, { grime: s.grime });
+    cartouche(ctx, W, H, ink, s, model);
     marks(ctx, W, H, ink, s.marks);
 
     ctx.restore();

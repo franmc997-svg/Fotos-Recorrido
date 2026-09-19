@@ -25,5 +25,27 @@ window.INKS = {
   nocturno: {
     label: 'Negativo',
     paper: '#12131a', ink: '#e6e3da', mid: '#8b8fa3', accent: '#c9d4e8'
+  },
+
+  /* Las de abajo están pensadas para la lámina de atlas, donde el duotono se
+     queda en el fondo y las fotos van a color. Ahí la tinta no tiene que
+     tragarse la imagen, solo dibujar el plano por debajo: papel más limpio,
+     tinta menos densa y un acento que aguante al lado de una foto en color
+     sin pelearse con ella. */
+  plano: {
+    label: 'Plano (color)',
+    paper: '#f6f4ef', ink: '#2f3742', mid: '#78838f', accent: '#41525f'
+  },
+  topografico: {
+    label: 'Topográfico (color)',
+    paper: '#f7f5ec', ink: '#3d4a33', mid: '#8a9679', accent: '#5d7048'
+  },
+  batimetria: {
+    label: 'Batimetría (color)',
+    paper: '#f2f5f7', ink: '#1f3f55', mid: '#6d93ab', accent: '#2f6f93'
+  },
+  terracota: {
+    label: 'Terracota (color)',
+    paper: '#f8f1e7', ink: '#5b3325', mid: '#a9765d', accent: '#8a4a2f'
   }
 };

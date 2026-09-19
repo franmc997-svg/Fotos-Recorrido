@@ -140,6 +140,45 @@
     </section>
 
     <section class="section">
+      <div class="section-head"><h3>Composición</h3></div>
+      <div class="field">
+        <label for="inLayout">Modo</label>
+        <select id="inLayout">
+          <option value="organico">Collage orgánico — todas las fotos</option>
+          <option value="atlas">Lámina de atlas — retícula y huecos</option>
+        </select>
+      </div>
+      <p id="layoutNote" class="tiny muted">
+        El orgánico teje todas las fotos hasta que caben. El atlas las recorta
+        en celdas y deja fuera las que no encuentran hueco: se ven menos fotos,
+        pero se lee el plano. Cambiar de modo reajusta el revelado.
+      </p>
+
+      <div id="atlasBlock" hidden>
+        <div class="field">
+          <label for="inGridCols">Columnas de la retícula: <b id="inGridColsVal">12</b></label>
+          <input id="inGridCols" type="range" min="4" max="28" step="1" value="12">
+        </div>
+        <div class="field">
+          <label for="inGridDensity">Cuánto se llena la retícula: <b id="inGridDensityVal">62</b>%</label>
+          <input id="inGridDensity" type="range" min="15" max="100" step="1" value="62">
+        </div>
+        <div class="field">
+          <label for="inGridSearch">Insistencia al buscar hueco: <b id="inGridSearchVal">2</b></label>
+          <input id="inGridSearch" type="range" min="0" max="5" step="1" value="2">
+        </div>
+        <div class="field">
+          <label for="inPhotoColor">Color de las fotos: <b id="inPhotoColorVal">105</b>%</label>
+          <input id="inPhotoColor" type="range" min="0" max="180" step="5" value="105">
+        </div>
+        <label class="check"><input type="checkbox" id="inGridSpan" checked> Bloques grandes donde hubo más fotos</label>
+        <label class="check"><input type="checkbox" id="inGridLines" checked> Dibujar la retícula</label>
+        <label class="check"><input type="checkbox" id="inCartouche" checked> Escala y norte</label>
+        <label class="check"><input type="checkbox" id="inMapWire" checked> Mapa a línea, sin rellenos</label>
+      </div>
+    </section>
+
+    <section class="section">
       <div class="section-head"><h3>Collage</h3></div>
       <div class="field">
         <label for="inShape">Forma de las piezas</label>

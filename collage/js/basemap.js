@@ -46,6 +46,55 @@
     };
   }
 
+  /* Paleta de línea: el mapa como plano dibujado, no como mapa impreso.
+
+     Aquí no hay manchas de color: el suelo, los parques y los edificios se
+     quedan en el papel, y lo único que queda dibujado son las calles, la
+     costa y los ríos. Es la diferencia entre poner una captura de mapa debajo
+     del collage y poner un plano: con relleno, cada hueco de la retícula es
+     un cuadrado gris; sin relleno, el hueco enseña el trazado y el papel
+     respira, que es lo que hace legible una lámina así. */
+  function wireTheme(ink) {
+    const t = paperTheme(ink);
+    return Object.assign(t, {
+      green: ink.paper,
+      land: ink.paper,
+      building: ink.paper,
+      buildingLine: mix(ink.paper, ink.ink, 0.22),
+      water: mix(ink.paper, ink.ink, 0.09),
+      waterway: mix(ink.paper, ink.ink, 0.5),
+      roadMajor: mix(ink.paper, ink.ink, 0.58),
+      roadMinor: mix(ink.paper, ink.ink, 0.34),
+      path: mix(ink.paper, ink.ink, 0.22),
+      dim: mix(ink.paper, ink.ink, 0.4)
+    });
+  }
+
+  /* Adelgazar el trazo. El tema solo cambia colores, y una autopista de ocho
+     píxeles en color tenue sigue siendo una mancha alargada: para que se lea
+     como línea de plano hay que tocar el grosor, que es lo que hace esto. */
+  function thinLines(map) {
+    const layers = (map.getStyle().layers || []);
+    for (const layer of layers) {
+      if (String(layer.id).startsWith('fr-')) continue;
+      try {
+        if (layer.type === 'line') {
+          map.setPaintProperty(layer.id, 'line-width', [
+            'interpolate', ['linear'], ['zoom'], 6, 0.35, 12, 0.7, 16, 1.2
+          ]);
+          map.setPaintProperty(layer.id, 'line-blur', 0);
+        } else if (layer.type === 'fill') {
+          const sl = String(layer['source-layer'] || '').toLowerCase();
+          const esAgua = sl === 'water' || /water|ocean|sea|lake/.test(String(layer.id).toLowerCase());
+          map.setPaintProperty(layer.id, 'fill-opacity', esAgua ? 0.55 : 0);
+          if (esAgua) map.setPaintProperty(layer.id, 'fill-outline-color', mix('#000000', '#ffffff', 0.5));
+        } else if (layer.type === 'fill-extrusion') {
+          map.setPaintProperty(layer.id, 'fill-extrusion-opacity', 0);
+        }
+      } catch (e) { /* capa sin esa propiedad: se salta */ }
+    }
+  }
+
   function waitFor(map, evt, ms) {
     return new Promise((res) => {
       let done = false;
@@ -67,7 +116,7 @@
     try { return await job; } finally { pending = null; }
   }
 
-  async function doCapture({ W, H, fit, ink, labels }) {
+  async function doCapture({ W, H, fit, ink, labels, wire }) {
     const cam = Project.captureCamera(fit, W, H, RATIO);
     const { center, zoom, cssW, cssH } = cam;
     const host = document.createElement('div');
@@ -94,7 +143,8 @@
       if (typeof map.setPixelRatio === 'function') map.setPixelRatio(RATIO);
 
       if (!(await waitFor(map, 'load', LOAD_MS))) return null;
-      MapView.applyTheme(map, paperTheme(ink), !!labels);
+      MapView.applyTheme(map, wire ? wireTheme(ink) : paperTheme(ink), !!labels);
+      if (wire) thinLines(map);
       await waitFor(map, 'idle', LOAD_MS);
       // Dos cuadros de gracia: 'idle' llega antes de que el último se pinte.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -118,7 +168,7 @@
   }
 
   window.Basemap = {
-    capture, paperTheme, mix,
+    capture, paperTheme, wireTheme, mix,
     get available() { return typeof maplibregl !== 'undefined'; }
   };
 })();

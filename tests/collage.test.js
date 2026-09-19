@@ -198,5 +198,151 @@ console.log('\nParadas lejanas');
   comprobar('sin lista no revienta', Layout.outliers(null, Trips.haversine).length === 0);
 }
 
+console.log('\nColocación en cuadrícula');
+{
+  const W = 1000, H = 1500;
+  const proj = Project.fit([[-3.72, 40.40], [-3.68, 40.44]], W, H, { padX: 0.08, padTop: 0.08, padBottom: 0.08 });
+  const fotos = [];
+  for (let i = 0; i < 40; i++) {
+    fotos.push({
+      id: 'f' + i,
+      lat: 40.40 + (i % 8) * 0.005,
+      lng: -3.72 + Math.floor(i / 8) * 0.008,
+      weight: 1 + (i % 5),
+      aspect: i % 3 === 0 ? 0.75 : 1.5
+    });
+  }
+  const cols = 10;
+  const piezas = Layout.grid(fotos, proj.project, W, H, { cols });
+  const cell = W / cols;
+
+  comprobar('coloca piezas, pero no necesariamente todas (los huecos son el efecto)',
+    piezas.length > 0 && piezas.length <= fotos.length, `${piezas.length} de ${fotos.length}`);
+
+  comprobar('cada pieza cae alineada a la retícula',
+    piezas.every((p) => {
+      const x0 = p.x - p.w / 2, y0 = p.y - p.h / 2;
+      return Math.abs(x0 / cell - Math.round(x0 / cell)) < 1e-6
+        && Math.abs(y0 / cell - Math.round(y0 / cell)) < 1e-6;
+    }));
+
+  comprobar('el lado de cada bloque es un múltiplo entero de la celda',
+    piezas.every((p) => Math.abs(p.w / cell - p.spanX) < 1e-6 && Math.abs(p.h / cell - p.spanY) < 1e-6));
+
+  // Que dos bloques no compartan celda es la propiedad que hace legible la lámina.
+  const ocupadas = new Set();
+  let choque = false;
+  for (const p of piezas) {
+    for (let a = 0; a < p.spanX; a++) {
+      for (let b = 0; b < p.spanY; b++) {
+        const k = (p.col + a) + ':' + (p.row + b);
+        if (ocupadas.has(k)) choque = true;
+        ocupadas.add(k);
+      }
+    }
+  }
+  comprobar('ningún bloque pisa una celda ya ocupada', !choque);
+
+  comprobar('ninguna pieza se sale del papel',
+    piezas.every((p) => p.x - p.w / 2 >= -1e-6 && p.y - p.h / 2 >= -1e-6
+      && p.x + p.w / 2 <= W + 1e-6 && p.y + p.h / 2 <= H + cell));
+
+  comprobar('nadie se va más lejos del radio de búsqueda que se le permitió',
+    piezas.every((p) => Math.abs(p.col - Math.floor(p.ax / cell)) <= 2
+      && Math.abs(p.row - Math.floor(p.ay / cell)) <= 2));
+
+  comprobar('las piezas salen en orden cronológico, que es lo que cose el hilo',
+    piezas.every((p, i) => i === 0 || piezas[i - 1].order <= p.order));
+
+  comprobar('conserva el punto geográfico real para poder manchar el mapa ahí',
+    piezas.every((p) => isFinite(p.ax) && isFinite(p.ay)));
+
+  comprobar('sin rotación: la retícula no se lee si las piezas van torcidas',
+    piezas.every((p) => p.rot === 0));
+
+  const otra = Layout.grid(fotos, proj.project, W, H, { cols });
+  comprobar('la colocación es determinista',
+    JSON.stringify(otra.map((p) => [p.id, p.col, p.row])) === JSON.stringify(piezas.map((p) => [p.id, p.col, p.row])));
+
+  const gordas = piezas.filter((p) => p.spanX > 1 || p.spanY > 1);
+  comprobar('las paradas con más peso consiguen bloque grande',
+    gordas.length > 0 && gordas.every((p) => (p.photo.weight || 1) >= 3),
+    `${gordas.length} bloques grandes`);
+
+  // Menos columnas = celdas mayores = menos sitio: tienen que caer más fotos.
+  const pocas = Layout.grid(fotos, proj.project, W, H, { cols: 4 });
+  comprobar('con la retícula gruesa entran menos fotos y quedan más huecos',
+    pocas.length < piezas.length, `${pocas.length} vs ${piezas.length}`);
+
+  comprobar('sin fotos devuelve lista vacía', Layout.grid([], proj.project, W, H, { cols }).length === 0);
+
+  const una = Layout.grid([{ id: 'u', lat: 40.42, lng: -3.70, weight: 1 }], proj.project, W, H, { cols });
+  comprobar('una foto sola entra siempre', una.length === 1);
+
+  const ret = Layout.gridLines(cols, W, H);
+  comprobar('la retícula de referencia cubre todo el papel',
+    ret.cols === cols && ret.rows * ret.cell >= H - 1e-6 && Math.abs(ret.cell - cell) < 1e-6);
+
+  /* El corte del bloque grande sale del percentil de la distribución. Con
+     pesos casi iguales, derivarlo del máximo daba bloque grande a tres de
+     cada cuatro fotos y el ajuste no gobernaba nada. */
+  const parejas = [];
+  for (let i = 0; i < 36; i++) {
+    parejas.push({ id: 'p' + i, lat: 40.40 + (i % 6) * 0.006, lng: -3.72 + Math.floor(i / 6) * 0.007,
+      weight: 3 + (i % 2), aspect: 1.4 });
+  }
+  const conPeso = Layout.grid(parejas, proj.project, W, H, { cols, bigShare: 0.1 });
+  const share = conPeso.filter((p) => p.spanX > 1 || p.spanY > 1).length / conPeso.length;
+  comprobar('con pesos parecidos NO se agranda casi todo',
+    share < 0.5, `${Math.round(share * 100)}% de bloques grandes`);
+  comprobar('sin bloques grandes permitidos, todo es una celda',
+    Layout.grid(parejas, proj.project, W, H, { cols, maxSpan: 1 })
+      .every((p) => p.spanX === 1 && p.spanY === 1));
+}
+
+console.log('\nHuecos de la lámina');
+{
+  const W = 1000, H = 1500;
+  const proj = Project.fit([[-3.73, 40.39], [-3.67, 40.45]], W, H, { padX: 0.06, padTop: 0.06, padBottom: 0.06 });
+  // Un bloque macizo: 60 fotos repartidas por una malla apretada.
+  const fotos = [];
+  for (let i = 0; i < 60; i++) {
+    fotos.push({ id: 'g' + i, lat: 40.40 + (i % 10) * 0.004, lng: -3.72 + Math.floor(i / 10) * 0.006, weight: 1 });
+  }
+  const opts = { cols: 12, maxSpan: 1 };
+  const lleno = Layout.grid(fotos, proj.project, W, H, opts);
+  const medio = Layout.grid(fotos, proj.project, W, H, Object.assign({ density: 0.5 }, opts));
+
+  comprobar('la densidad recorta a la fracción pedida',
+    medio.length === Math.round(lleno.length * 0.5), `${medio.length} de ${lleno.length}`);
+
+  // Lo que importa no es cuántas quedan, es que se abran huecos DENTRO de la
+  // mancha: el vecindario medio tiene que bajar, o sólo se habría recortado
+  // por los bordes y la masa seguiría maciza.
+  const vecindad = (lista) => {
+    const set = new Set(lista.map((p) => p.col + ':' + p.row));
+    let n = 0;
+    for (const p of lista) {
+      for (const [c, r] of [[p.col - 1, p.row], [p.col + 1, p.row], [p.col, p.row - 1], [p.col, p.row + 1]]) {
+        if (set.has(c + ':' + r)) n++;
+      }
+    }
+    return n / lista.length;
+  };
+  comprobar('quitar piezas abre huecos dentro de la mancha, no sólo en el borde',
+    vecindad(medio) < vecindad(lleno) - 0.5,
+    `${vecindad(lleno).toFixed(2)} -> ${vecindad(medio).toFixed(2)} vecinos de media`);
+
+  comprobar('la disolución también es determinista',
+    JSON.stringify(Layout.grid(fotos, proj.project, W, H, Object.assign({ density: 0.5 }, opts))
+      .map((p) => p.id)) === JSON.stringify(medio.map((p) => p.id)));
+
+  comprobar('al 100% no quita nada',
+    Layout.grid(fotos, proj.project, W, H, Object.assign({ density: 1 }, opts)).length === lleno.length);
+
+  comprobar('una densidad mínima deja al menos una pieza',
+    Layout.grid(fotos, proj.project, W, H, Object.assign({ density: 0.001 }, opts)).length >= 1);
+}
+
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');
 process.exit(fallos ? 1 : 0);

@@ -34,6 +34,9 @@
       pieceAlpha: 1, rotation: true, blend: 'normal', numbered: false,
       pieces: 16, groupRadiusM: 500,
       frameZoom: 1, framePanX: 0, framePanY: 0,
+      layout: 'organico', duotoneScope: 'todo', photoColor: 1,
+      gridCols: 12, gridSearch: 2, gridBig: 0.12, gridSpan: true, gridDensity: 0.62,
+      gridLines: false, cartouche: false, mapWire: false,
       showTrack: true, trackWidth: 1, trackOpacity: 1,
       showRoute: true, routeDashed: false, routeAbove: true, routeLongOnly: true,
       routeWidth: 1.2, halo: 0.35,
@@ -42,6 +45,42 @@
     };
   }
   let s = defaults();
+
+  /* Los dos modos no comparten ajustes buenos.
+
+     Cambiar de composición y dejar los veinte deslizadores donde estaban da
+     una lámina de atlas revelada como un escaneo sepia, con sombras bajo cada
+     recorte y sin retícula: ni se parece a lo que promete el selector ni hay
+     forma de adivinar cuáles de los veinte hay que mover. Cada modo trae su
+     propio punto de partida; a partir de ahí se toca lo que se quiera. */
+  const PRESETS = {
+    organico: {
+      shape: 'rasgado', rotation: true, shadow: 0.4, separation: 0.32,
+      duotoneScope: 'todo', duotone: 0.7, contrast: 1.25, grain: 0.09,
+      texture: 0.7, grime: 0.45, mapStrength: 0.8, mapStain: 0.45, mapWire: false,
+      gridLines: false, cartouche: false, marks: true, halo: 0.35,
+      showTrack: true, routeLongOnly: true, size: 0.155
+    },
+    atlas: {
+      shape: 'recorte', rotation: false, shadow: 0, separation: 0,
+      /* Aquí está el cambio que de verdad importa: el duotono se queda en el
+         fondo y las fotos van a color. Todo lo demás solo le quita ruido
+         encima para que el plano de debajo se vea. */
+      duotoneScope: 'fondo', duotone: 0.85, contrast: 1.1, grain: 0.05,
+      texture: 0.35, grime: 0.12, photoColor: 1.05,
+      mapStrength: 0.95, mapStain: 0, mapWire: true,
+      gridLines: true, cartouche: true, marks: false, halo: 0,
+      /* El hilo va por debajo: cruzando por encima de los recortes convierte
+         la lámina en una maraña, y asomando solo por los huecos hace lo que
+         hace en las láminas de verdad, que es coser el papel vacío. */
+      showTrack: true, trackOpacity: 0.55, routeAbove: false, routeLongOnly: true,
+      ink: 'plano', gridDensity: 0.62
+    }
+  };
+
+  function aplicarPreset(modo) {
+    Object.assign(s, PRESETS[modo] || {}, { layout: modo });
+  }
 
   /* ---------------- avisos ---------------- */
   let bannerTimer = null;
@@ -367,25 +406,39 @@
           -(s.framePanX / 100) * (W / 2) / autoProj.k,
           -(s.framePanY / 100) * (H / 2) / autoProj.k);
 
-    const pieces = Layout.build(
-      list.map(({ r, weight }) => {
-        const img = state.imgs.get(r.idx);
-        return {
-          id: String(r.idx), lat: r.lat, lng: r.lng, takenAt: r.takenAt,
-          weight, aspect: img ? img.width / img.height : 1
-        };
-      }),
-      proj.project, W, H,
-      {
-        baseSize: s.size,
-        sizeByWeight: s.weight,
-        separation: 1 - s.separation,
-        rotation: s.rotation ? 5 : 0,
-        drift: 1.6
-      }
-    );
-    pieces.forEach((p, i) => {
-      p.img = state.imgs.get(list[i].r.idx) || null;
+    const entrada = list.map(({ r, weight }) => {
+      const img = state.imgs.get(r.idx);
+      return {
+        id: String(r.idx), idx: r.idx, lat: r.lat, lng: r.lng, takenAt: r.takenAt,
+        weight, aspect: img ? img.width / img.height : 1
+      };
+    });
+
+    /* Dos maneras de repartir las mismas fotos sobre el mismo mapa.
+
+       La orgánica las deja en su sitio y las empuja hasta que caben: sale un
+       tejido continuo. La de atlas las mete en celdas de una retícula y deja
+       fuera las que no encuentran hueco cerca: sale una lámina con huecos, y
+       los huecos son justamente donde se lee el plano. No es que una sea mejor:
+       una enseña todas las fotos y la otra enseña el sitio. */
+    const pieces = s.layout === 'atlas'
+      ? Layout.grid(entrada, proj.project, W, H, {
+          cols: s.gridCols,
+          search: s.gridSearch,
+          bigShare: s.gridBig,
+          density: s.gridDensity,
+          maxSpan: s.gridSpan ? 2 : 1
+        })
+      : Layout.build(entrada, proj.project, W, H, {
+          baseSize: s.size,
+          sizeByWeight: s.weight,
+          separation: 1 - s.separation,
+          rotation: s.rotation ? 5 : 0,
+          drift: 1.6
+        });
+    // Por identidad y no por índice: en la retícula no entran todas las fotos.
+    pieces.forEach((p) => {
+      p.img = state.imgs.get(p.photo && p.photo.idx) || null;
     });
 
     const track = Trips.simplify(trackPts.map((r) => proj.project(r.lng, r.lat)), 0.9);
@@ -400,6 +453,8 @@
       footer: s.showFooter
         ? ('fotos-recorrido · ' + (base ? MapView.ATTRIB : '© OpenStreetMap contributors'))
         : '',
+      pxPerKm: proj.pxPerKm(list.length ? list[0].r.lat : 0),
+      dentro: pieces.length, candidatas: list.length,
       strain: Layout.strain(pieces, proj.pxPerKm(list.length ? list[0].r.lat : 0))
     };
   }
@@ -455,7 +510,7 @@
 
   function baseKey(W, H, cam) {
     return [W, H, cam.center[0].toFixed(5), cam.center[1].toFixed(5),
-      cam.zoom.toFixed(4), s.ink, s.mapLabels ? 1 : 0].join('|');
+      cam.zoom.toFixed(4), s.ink, s.mapLabels ? 1 : 0, s.mapWire ? 'w' : 'p'].join('|');
   }
 
   function requestBasemap(W, H, proj) {
@@ -465,7 +520,7 @@
     if (baseCache.key === key || baseCache.pending === key) return;
     baseCache.pending = key;
     $('mapHint').textContent = 'Trayendo el mapa…';
-    Basemap.capture({ W, H, fit: proj, ink: inkOf(), labels: s.mapLabels })
+    Basemap.capture({ W, H, fit: proj, ink: inkOf(), labels: s.mapLabels, wire: s.mapWire })
       .then((cv) => {
         if (baseCache.pending !== key) return;   // llegó tarde: ya hay otra petición
         baseCache.key = key;
@@ -512,6 +567,22 @@
     const hint = $('strainHint');
     const st = model.strain;
     hint.hidden = false;
+
+    /* En la lámina de atlas la cifra de deformación no dice nada: las piezas
+       se corren a su celda por definición. Lo que hay que saber ahí es cuántas
+       fotos se quedaron fuera por no haber hueco cerca, porque es la palanca
+       real (más columnas = más celdas = entran más, y menos papel en blanco). */
+    if (s.layout === 'atlas') {
+      const fuera = model.candidatas - model.dentro;
+      const pct = model.candidatas ? Math.round(model.dentro / model.candidatas * 100) : 0;
+      hint.textContent = fuera > 0
+        ? `${model.dentro} de ${model.candidatas} fotos han encontrado celda (${pct}%). `
+          + 'Con más columnas caben más; con menos, más papel en blanco.'
+        : `Las ${model.dentro} fotos han entrado en la retícula.`;
+      hint.className = 'tiny muted';
+      return;
+    }
+
     if (st.ratio < 0.4) {
       hint.textContent = 'Las fotos están prácticamente en su sitio.';
     } else if (st.ratio < 1.6) {
@@ -543,7 +614,7 @@
       if (s.mapStrength && Basemap.available) {
         busy(true, 'Trayendo el mapa a resolución final…');
         base = await Basemap.capture({ W: w, H: h, fit: buildModel(w, h, null).proj,
-          ink: inkOf(), labels: s.mapLabels });
+          ink: inkOf(), labels: s.mapLabels, wire: s.mapWire });
         busy(true, `Generando ${w} × ${h}…`);
       }
       Render.render(cv.getContext('2d'), w, h, buildModel(w, h, base), s);
@@ -708,6 +779,12 @@
     $('inMarks').checked = s.marks;
     $('inFrame').checked = s.frame;
     $('inMapLabels').checked = s.mapLabels;
+    $('inLayout').value = s.layout;
+    $('inGridSpan').checked = !!s.gridSpan;
+    $('inGridLines').checked = !!s.gridLines;
+    $('inCartouche').checked = !!s.cartouche;
+    $('inMapWire').checked = !!s.mapWire;
+    $('atlasBlock').hidden = s.layout !== 'atlas';
     const put = (id, v, dec) => {
       $(id).value = v;
       const lab = $(id + 'Val');
@@ -731,6 +808,10 @@
     put('inShadow', Math.round(s.shadow * 100));
     put('inMap', Math.round(s.mapStrength * 100));
     put('inMapStain', Math.round(s.mapStain * 100));
+    put('inGridCols', s.gridCols);
+    put('inGridSearch', s.gridSearch);
+    put('inGridDensity', Math.round(s.gridDensity * 100));
+    put('inPhotoColor', Math.round(s.photoColor * 100));
     put('inFrameZoom', Math.round(s.frameZoom * 100));
     put('inFramePanX', Math.round(s.framePanX));
     put('inFramePanY', Math.round(s.framePanY));
@@ -828,6 +909,25 @@
       $('inGroupVal').textContent = fmtM(s.groupRadiusM);
     });
     $('inGroup').addEventListener('change', () => { recomputeStops(); markDirty(); });
+
+    /* El modo trae su propio punto de partida y luego redibuja los controles:
+       si no se sincroniza la interfaz, los deslizadores mentirían sobre lo que
+       de verdad se está pintando. */
+    $('inLayout').onchange = (e) => {
+      aplicarPreset(e.target.value);
+      Render.clearCache();
+      syncControls();
+      rebuild();
+      markDirty();
+    };
+    range('inGridCols', (v) => { s.gridCols = v; Render.clearCache(); });
+    range('inGridSearch', (v) => { s.gridSearch = v; });
+    range('inGridDensity', (v) => { s.gridDensity = v / 100; }, (v) => v + '%');
+    range('inPhotoColor', (v) => { s.photoColor = v / 100; }, (v) => v + '%');
+    check('inGridSpan', (v) => { s.gridSpan = v; Render.clearCache(); });
+    check('inGridLines', (v) => { s.gridLines = v; });
+    check('inCartouche', (v) => { s.cartouche = v; });
+    check('inMapWire', (v) => { s.mapWire = v; });
 
     // Encuadre manual: alejar para ver más sitio, o correr el centro para que
     // una pieza que roza el borde quede dentro. Igual que "Encuadrar" y el
