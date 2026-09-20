@@ -333,12 +333,13 @@
 <dialog id="videoDlg" class="dlg">
   <form method="dialog">
     <h3>Vídeo del recorrido</h3>
-    <p class="tiny muted">Las fotos entran por orden de reloj de la cámara y la traza
-      se dibuja con ellas, hasta que el encuadre se abre y cabe todo el recorrido.</p>
+    <p class="tiny muted">La cámara va parada por parada en el orden del reloj,
+      se detiene mientras caen las fotos de cada sitio y, cuando ya están todas,
+      se abre hasta enseñar el collage entero.</p>
     <div class="field">
       <label for="vidDur">Duración</label>
-      <input type="range" id="vidDur" min="6" max="40" step="1" value="15">
-      <output id="vidDurOut">15 s</output>
+      <input type="range" id="vidDur" min="6" max="90" step="1" value="18">
+      <output id="vidDurOut">18 s</output>
     </div>
     <div class="field">
       <label for="vidSize">Tamaño</label>
@@ -355,11 +356,12 @@
       </select>
     </div>
     <div class="field">
-      <label for="vidZoom">Zoom de entrada</label>
-      <input type="range" id="vidZoom" min="100" max="180" step="5" value="125">
-      <output id="vidZoomOut">125%</output>
+      <label for="vidZoom">Acercamiento</label>
+      <input type="range" id="vidZoom" min="100" max="300" step="10" value="220">
+      <output id="vidZoomOut">220%</output>
     </div>
     <p id="vidNota" class="tiny muted"></p>
+    <p><button type="button" id="vidRec" class="btn ghost" hidden></button></p>
     <menu>
       <button value="cancel" class="btn ghost">Cancelar</button>
       <button id="vidGo" value="ok" class="btn primary">Grabar</button>

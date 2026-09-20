@@ -346,97 +346,191 @@ console.log('\nHuecos de la lámina');
 }
 
 
+console.log('\nParadas de la cámara');
+{
+  /* Un viaje sintético con la forma que da problemas de verdad: una plaza con
+     muchas fotos, una foto suelta lejos, otro sitio, y la vuelta a la plaza
+     horas después. */
+  const pts = [];
+  const sitio = (x, y, n, t0) => {
+    for (let i = 0; i < n; i++) pts.push({ x, y: y + i * 3, w: 120, h: 150, t: t0 + i * 60000 });
+  };
+  const MIN = 60000;
+  sitio(300, 400, 25, 0);
+  sitio(900, 700, 1, 90 * MIN);
+  sitio(1200, 1500, 8, 200 * MIN);
+  sitio(300, 400, 4, 600 * MIN);
+  const W = 1600, H = 2400;
+  const g = Video.paradas(pts, W, H, {});
+
+  comprobar('las fotos del mismo sitio y rato hacen una sola parada',
+    g.length === 4, g.map((x) => x.n).join('+'));
+  comprobar('la plaza entera es una parada', g[0].n === 25);
+  comprobar('una foto suelta lejos es su propia parada', g[1].n === 1);
+
+  /* Lo que distingue un recorrido de un mapa: volver cuenta. Mismo sitio,
+     misma caja, pero diez horas más tarde. */
+  comprobar('volver al mismo sitio horas después es otra parada',
+    g[3].n === 4 && Math.abs(g[3].cx - g[0].cx) < 1);
+
+  comprobar('las paradas cubren todas las fotos, en orden y sin huecos',
+    g[0].desde === 0 && g[g.length - 1].hasta === pts.length - 1
+      && g.every((x, i) => i === 0 || x.desde === g[i - 1].hasta + 1));
+  comprobar('y la cuenta de fotos cuadra',
+    g.reduce((a, x) => a + x.n, 0) === pts.length);
+
+  const tope = Video.paradas(pts, W, H, { tope: 2 });
+  comprobar('el tope funde paradas hasta caber', tope.length === 2);
+  comprobar('fundir no pierde ninguna foto',
+    tope.reduce((a, x) => a + x.n, 0) === pts.length);
+  comprobar('ni rompe el orden',
+    tope[0].desde === 0 && tope[1].hasta === pts.length - 1
+      && tope[1].desde === tope[0].hasta + 1);
+
+  /* El tiempo por separado, sin que la distancia opine: el mismo sitio, la
+     misma caja, dos ratos. Fotos de WhatsApp y capturas llegan sin fecha
+     fiable, y entonces no hay nada por lo que partir. */
+  const dosRatos = [];
+  for (let i = 0; i < 6; i++) dosRatos.push({ x: 300, y: 400 + i * 3, w: 120, h: 150, t: i * MIN });
+  for (let i = 0; i < 6; i++) dosRatos.push({ x: 300, y: 400 + i * 3, w: 120, h: 150, t: (600 + i) * MIN });
+  comprobar('el mismo sitio en dos ratos distintos son dos paradas',
+    Video.paradas(dosRatos, W, H, {}).length === 2);
+
+  const sinFecha = dosRatos.map((q) => ({ x: q.x, y: q.y, w: q.w, h: q.h, t: 0 }));
+  const sf = Video.paradas(sinFecha, W, H, {});
+  comprobar('sin fechas no se parte por tiempo y queda una sola parada',
+    sf.length === 1 && sf[0].n === dosRatos.length, sf.map((x) => x.n).join('+'));
+
+  comprobar('sin fotos no revienta', Video.paradas([], W, H, {}).length === 0);
+  comprobar('con una sola foto sale una parada',
+    Video.paradas([pts[0]], W, H, {}).length === 1);
+}
+
 console.log('\nLínea de tiempo del vídeo');
 {
-  const pl = Video.plan(20, { duracion: 15, cierre: 1.6, entrada: 0.45 });
+  const caja = (desde, n) => ({ desde, hasta: desde + n - 1, n,
+    x0: 0, x1: 200, y0: 0, y1: 200, cx: 100, cy: 100 });
+  const grupos = [caja(0, 25), caja(25, 1), caja(26, 8), caja(34, 4)];
+  const pl = Video.plan(grupos, { duracion: 18, cierre: 2.6, entrada: 0.4 });
 
   comprobar('el montaje acaba donde empieza el cierre',
-    Math.abs(pl.montaje - (15 - 1.6)) < 1e-9, pl.montaje);
+    Math.abs(pl.montaje - (18 - 2.6)) < 1e-9, pl.montaje);
   comprobar('las fotos entran en orden',
     pl.inicio.every((v, i) => i === 0 || v >= pl.inicio[i - 1]));
-  comprobar('la primera foto arranca en el segundo cero', pl.inicio[0] === 0);
-
-  /* El fallo fácil: repartir las fotos hasta el final del montaje, con lo que
-     la última empieza a aparecer justo cuando ya no queda tiempo y la lámina
-     se completa de golpe durante el cierre. */
+  comprobar('la primera arranca en el segundo cero', pl.inicio[0] === 0);
   comprobar('la última acaba de entrar justo al cerrar el montaje',
-    Math.abs((pl.inicio[19] + pl.entrada) - pl.montaje) < 1e-9,
-    `${(pl.inicio[19] + pl.entrada).toFixed(3)} vs ${pl.montaje}`);
+    Math.abs((pl.inicio[pl.n - 1] + pl.entrada) - pl.montaje) < 1e-9,
+    `${(pl.inicio[pl.n - 1] + pl.entrada).toFixed(3)} vs ${pl.montaje}`);
+
+  const dur = pl.paradas.map((p) => p.fin - p.ini);
+  comprobar('las paradas van seguidas y llenan el montaje',
+    pl.paradas.every((p, i) => i === 0 || Math.abs(p.ini - pl.paradas[i - 1].fin) < 1e-9)
+      && Math.abs(pl.paradas[pl.paradas.length - 1].fin - pl.montaje) < 1e-9);
+
+  /* El reparto va con la raíz del número de fotos, no proporcional: con 25
+     fotos frente a 1, lo proporcional daría 25 veces más tiempo y la foto
+     suelta pasaría en dos fotogramas. */
+  comprobar('una parada con muchas fotos dura más que una de una sola',
+    dur[0] > dur[1]);
+  comprobar('pero no proporcionalmente más',
+    dur[0] / dur[1] < 8, `${(dur[0] / dur[1]).toFixed(1)} veces`);
+
+  comprobar('la entrada nunca dura más que la parada más corta',
+    pl.entrada <= Math.min.apply(null, dur));
 
   const fin = Video.estado(pl, pl.duracion);
   comprobar('al terminar están todas puestas y ninguna entrando',
-    fin.firmes === 20 && fin.vuelo.length === 0 && fin.traza === 1);
-  comprobar('al empezar el cierre ya está todo puesto',
-    Video.estado(pl, pl.montaje).firmes === 20);
-
-  const arranque = Video.estado(pl, 0);
+    fin.firmes === pl.n && fin.vuelo.length === 0 && fin.traza === 1);
+  comprobar('al empezar el plano general ya está todo puesto',
+    Video.estado(pl, pl.montaje).firmes === pl.n);
   comprobar('en el segundo cero no hay nada puesto',
-    arranque.firmes === 0 && arranque.vuelo.length === 0, JSON.stringify(arranque.vuelo));
+    Video.estado(pl, 0).firmes === 0 && Video.estado(pl, 0).vuelo.length === 0);
 
-  // Recorrido completo: ninguna foto puede desaparecer ni adelantarse.
   let coherente = true, retrocede = false, previo = 0;
   for (let t = 0; t <= pl.duracion; t += 0.05) {
     const st = Video.estado(pl, t);
     if (st.firmes < previo) retrocede = true;
     previo = st.firmes;
     for (const v of st.vuelo) {
-      if (v.i < st.firmes) coherente = false;            // ya asentada y aún en vuelo
-      if (v.alpha <= 0 || v.alpha > 1) coherente = false;
-      if (t < pl.inicio[v.i]) coherente = false;         // entrando antes de su hora
+      if (v.i < st.firmes || v.alpha <= 0 || v.alpha > 1 || t < pl.inicio[v.i]) coherente = false;
     }
   }
   comprobar('las fotos nunca desaparecen una vez puestas', !retrocede);
-  comprobar('las que están entrando lo hacen a su hora y con opacidad válida', coherente);
+  comprobar('las que entran lo hacen a su hora y con opacidad válida', coherente);
 
-  comprobar('con una sola foto no revienta',
-    Video.estado(Video.plan(1, { duracion: 8 }), 8).firmes === 1);
-  comprobar('sin fotos tampoco',
-    Video.estado(Video.plan(0, { duracion: 8 }), 8).firmes === 0);
-
-  // Un cierre absurdo no puede dejar el montaje en cero: las fotos no tendrían
-  // ningún hueco donde entrar.
-  const apretado = Video.plan(10, { duracion: 10, cierre: 99 });
+  const solo = Video.plan([caja(0, 1)], { duracion: 8 });
+  comprobar('con una sola foto no revienta', Video.estado(solo, 8).firmes === 1);
+  const apretado = Video.plan(grupos, { duracion: 7, cierre: 99 });
   comprobar('un cierre exagerado se recorta y deja montaje',
-    apretado.montaje > 0 && apretado.cierre <= 10 * 0.4,
-    `montaje ${apretado.montaje}, cierre ${apretado.cierre}`);
-  comprobar('y aun así todas entran antes de acabar',
-    Video.estado(apretado, apretado.duracion).firmes === 10);
+    apretado.montaje > 0 && Video.estado(apretado, apretado.duracion).firmes === apretado.n);
 }
 
-console.log('\nEncuadre del vídeo');
+console.log('\nRecorrido de la cámara');
 {
-  const W = 1200, H = 1800;
-  const pl = Video.plan(12, { duracion: 12, cierre: 1.5 });
-  const foco = [180, 240];
+  const W = 1200, H = 1800, ACERCA = 2.2;
+  const caja = (desde, n, cx, cy) => ({ desde, hasta: desde + n - 1, n, cx, cy,
+    x0: cx - 90, x1: cx + 90, y0: cy - 110, y1: cy + 110 });
+  const grupos = [caja(0, 10, 150, 200), caja(10, 4, 1000, 1600), caja(14, 6, 600, 900)];
+  const pl = Video.plan(grupos, { duracion: 16, cierre: 2.6, apertura: 1.3 });
 
-  const fin = Video.camara(pl, pl.duracion, W, H, 1.4, foco);
+  const fin = Video.camara(pl, pl.duracion, W, H, ACERCA);
   comprobar('acaba enseñando la lámina entera',
     Math.abs(fin.sw - W) < 1e-6 && Math.abs(fin.sh - H) < 1e-6
       && fin.sx === 0 && fin.sy === 0, JSON.stringify(fin));
 
-  const ini = Video.camara(pl, 0, W, H, 1.4, foco);
-  comprobar('arranca cerrada al zoom pedido',
-    Math.abs(ini.sw - W / 1.4) < 1e-6, ini.sw);
+  /* Lo que pidió el usuario: que la cámara siga a las fotos. Estando quieta en
+     una parada, su caja tiene que caer dentro del encuadre. */
+  let enfoca = true;
+  pl.paradas.forEach((p, i) => {
+    const t = p.ini + (p.fin - p.ini) * 0.8;   // ya parada, sin moverse
+    const c = Video.camara(pl, t, W, H, ACERCA);
+    const g = grupos[i];
+    if (g.x0 < c.sx - 1 || g.x1 > c.sx + c.sw + 1
+      || g.y0 < c.sy - 1 || g.y1 > c.sy + c.sh + 1) enfoca = false;
+  });
+  comprobar('en cada parada su grupo cae dentro del encuadre', enfoca);
 
-  /* El recorte tiene que caber dentro de la lámina: si se sale, drawImage
-     rellena con transparencia y el vídeo abre con una banda vacía. El foco
-     está pegado a una esquina justamente para forzarlo. */
-  let dentro = true, crece = true, previo = 0;
-  for (let t = 0; t <= pl.duracion; t += 0.05) {
-    const c = Video.camara(pl, t, W, H, 1.4, foco);
+  const a = Video.camara(pl, pl.paradas[0].ini + (pl.paradas[0].fin - pl.paradas[0].ini) * 0.7, W, H, ACERCA);
+  const b = Video.camara(pl, pl.paradas[1].ini + (pl.paradas[1].fin - pl.paradas[1].ini) * 0.7, W, H, ACERCA);
+  comprobar('y dos paradas distintas se miran desde sitios distintos',
+    Math.hypot(a.sx - b.sx, a.sy - b.sy) > W * 0.1);
+
+  /* Quieta en el tramo final de la parada: si la cámara no para nunca, el
+     vídeo parece grabado a pulso y no da tiempo a mirar ninguna foto. */
+  const p0 = pl.paradas[0];
+  const q1 = Video.camara(pl, p0.ini + (p0.fin - p0.ini) * 0.6, W, H, ACERCA);
+  const q2 = Video.camara(pl, p0.ini + (p0.fin - p0.ini) * 0.95, W, H, ACERCA);
+  comprobar('la cámara se queda quieta en el tramo final de cada parada',
+    Math.abs(q1.sx - q2.sx) < 1e-6 && Math.abs(q1.sw - q2.sw) < 1e-6);
+
+  let dentro = true, proporcion = true, cerca = true;
+  for (let t = 0; t <= pl.duracion; t += 0.04) {
+    const c = Video.camara(pl, t, W, H, ACERCA);
     if (c.sx < -1e-9 || c.sy < -1e-9 || c.sx + c.sw > W + 1e-9 || c.sy + c.sh > H + 1e-9) dentro = false;
-    if (c.sw < previo - 1e-9) crece = false;
-    previo = c.sw;
+    if (Math.abs((c.sw / c.sh) - (W / H)) > 1e-9) proporcion = false;
+    // Nunca más cerca de lo pedido, o la lámina saldría ampliada y borrosa.
+    if (c.sw < W / ACERCA - 1e-6) cerca = false;
   }
   comprobar('el encuadre nunca se sale de la lámina', dentro);
-  comprobar('y sólo se abre, nunca se vuelve a cerrar', crece);
+  comprobar('la proporción del recorte es siempre la de la lámina', proporcion);
+  comprobar('nunca se acerca más de lo pedido', cerca);
 
-  const sin = Video.camara(pl, 3, W, H, 1, foco);
-  comprobar('sin zoom el encuadre es la lámina entera desde el principio',
+  const sin = Video.camara(pl, 3, W, H, 1);
+  comprobar('sin acercamiento el encuadre es la lámina entera',
     sin.sx === 0 && sin.sy === 0 && sin.sw === W && sin.sh === H);
 
-  comprobar('la proporción del recorte es la de la lámina',
-    Math.abs((ini.sw / ini.sh) - (W / H)) < 1e-9);
+  /* El marco y el título son mobiliario de la lámina impresa: de cerca salen
+     partidos, así que no se imprimen hasta que el plano se abre. */
+  comprobar('el mobiliario de la lámina no se ve durante el recorrido',
+    Video.remate(pl, 0) === 0 && Video.remate(pl, pl.montaje * 0.99) === 0);
+  comprobar('y está entero al acabar', Video.remate(pl, pl.duracion) === 1);
+  let sube = true, prev = -1;
+  for (let t = 0; t <= pl.duracion; t += 0.02) {
+    const r = Video.remate(pl, t);
+    if (r < prev - 1e-9 || r < 0 || r > 1) sube = false;
+    prev = r;
+  }
+  comprobar('y aparece de una vez, sin ir y venir', sube);
 }
 
 console.log(fallos ? `\n${fallos} comprobaciones fallidas` : '\nTodo correcto');

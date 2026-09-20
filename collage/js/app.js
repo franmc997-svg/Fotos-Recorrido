@@ -652,7 +652,8 @@
      El mapa se pide al tamaño de la lámina y no al del vídeo: cuando el
      encuadre está cerrado del todo se ve a píxel, y ampliar una captura de
      mapa se nota mucho más que ampliar una foto. */
-  async function exportVideo() {
+  /* Medidas del vídeo y de la lámina sobre la que se mueve la cámara. */
+  function medidasVideo() {
     const largo = Number($('vidSize').value) || 1920;
     const a = window.ASPECTS[s.aspect] || window.ASPECTS['2:3'];
     const k = largo / Math.max(a.w, a.h);
@@ -660,10 +661,15 @@
     // otros recortan una fila sin avisar.
     const par = (v) => Math.max(2, Math.round(v * k / 2) * 2);
     const ancho = par(a.w), alto = par(a.h);
-    const zoom = (Number($('vidZoom').value) || 125) / 100;
-    const duracion = Number($('vidDur').value) || 15;
+    const acercamiento = (Number($('vidZoom').value) || 220) / 100;
+    return { ancho, alto, acercamiento,
+      W: Math.round(ancho * acercamiento), H: Math.round(alto * acercamiento) };
+  }
+
+  async function exportVideo() {
+    const { ancho, alto, acercamiento, W, H } = medidasVideo();
+    const duracion = Number($('vidDur').value) || 18;
     const fps = Number($('vidFps').value) || 30;
-    const W = Math.round(ancho * zoom), H = Math.round(alto * zoom);
 
     let cancelado = false;
     const btn = $('btnCancelVid');
@@ -679,7 +685,7 @@
           ink: inkOf(), labels: s.mapLabels, wire: s.mapWire });
       }
       busy(true, 'Montando la lámina…');
-      const peli = Video.pelicula({ ancho, alto, zoom, duracion, fps,
+      const peli = Video.pelicula({ ancho, alto, acercamiento, duracion, fps,
         model: buildModel(W, H, base), s });
 
       const stage = $('stage');
@@ -699,6 +705,13 @@
       setTimeout(() => URL.revokeObjectURL(enlace.href), 10000);
 
       const mb = (r.blob.size / 1048576).toFixed(1);
+      // Si el cupo de memoria recortó el acercamiento, más vale decirlo: el
+      // vídeo sale bien pero la cámara no se acerca lo que se le pidió.
+      if (peli.acercamiento < acercamiento - 0.01) {
+        banner(`El acercamiento se ha quedado en ${Math.round(peli.acercamiento * 100)}%`
+          + ` en vez de ${Math.round(acercamiento * 100)}%: a ese tamaño la lámina no`
+          + ' cabía en memoria. Con un vídeo más pequeño sí cabe.', 'warn');
+      }
       banner(r.extension === 'mp4'
         ? `Vídeo listo: MP4, ${ancho}×${alto}, ${duracion} s, ${mb} MB.`
         : `Vídeo listo: WebM, ${ancho}×${alto}, ${duracion} s, ${mb} MB. `
@@ -1032,22 +1045,53 @@
       if ($('exportDlg').returnValue === 'ok') exportImage();
     });
 
+    /* Cuántos sitios distintos visita la cámara.
+
+       Se cuenta aquí y no al grabar porque es la cifra que decide si la
+       duración elegida sirve de algo: con más sitios que tiempo, las paradas
+       se funden y la cámara se queda mirando la lámina entera en vez de
+       acercarse a nada. Más vale decirlo antes de grabar que después. */
+    let sitios = 0;
+    const contarSitios = () => {
+      const { W, H } = medidasVideo();
+      const nat = Video.paradas(Video.puntosDe(buildModel(W, H, null).pieces), W, H, {});
+      sitios = nat.length;
+    };
+
     const vidNota = () => {
       const mime = Video.mimeSoportado();
-      const dur = Number($('vidDur').value) || 15;
+      const dur = Number($('vidDur').value) || 18;
       $('vidDurOut').textContent = dur + ' s';
-      $('vidZoomOut').textContent = ($('vidZoom').value || 125) + '%';
-      $('vidNota').textContent = !mime
-        ? 'Este navegador no sabe grabar vídeo desde un lienzo.'
-        : (Video.extensionDe(mime) === 'mp4'
-            ? 'Saldrá en MP4. '
-            : 'Este navegador solo graba WebM; para MP4 hace falta Chrome o Safari. ')
-          + `Se graba a tiempo real, así que tardará los ${dur} s del vídeo más `
-          + 'lo que cueste montar la lámina.';
+      $('vidZoomOut').textContent = ($('vidZoom').value || 220) + '%';
+      if (!mime) {
+        $('vidNota').textContent = 'Este navegador no sabe grabar vídeo desde un lienzo.';
+        $('vidRec').hidden = true;
+        return;
+      }
+      const rec = Video.recomendado(sitios);
+      const caben = Math.max(1, Math.min(sitios,
+        Math.floor((dur - Video.DEFAULTS.cierre) / Video.DEFAULTS.minParada)));
+      const formato = Video.extensionDe(mime) === 'mp4'
+        ? 'Saldrá en MP4.'
+        : 'Este navegador solo graba WebM; para MP4 hace falta Chrome o Safari.';
+      $('vidNota').textContent = `Este viaje tiene ${sitios} sitios. `
+        + (caben >= sitios
+          ? `Con ${dur} s la cámara los visita todos de cerca. `
+          : `Con ${dur} s la cámara junta esos sitios en ${caben} paradas, así que `
+            + `se queda más lejos; para visitarlos todos de cerca hacen falta ${rec} s. `)
+        + formato + ' Se graba a tiempo real, así que tardará los '
+        + `${dur} s del vídeo más lo que cueste montar la lámina.`;
+      $('vidRec').hidden = caben >= sitios || rec === dur;
+      $('vidRec').textContent = `Poner ${rec} s y visitarlos todos`;
     };
-    $('btnVideo').onclick = () => { vidNota(); $('videoDlg').showModal(); };
+    $('btnVideo').onclick = () => { contarSitios(); vidNota(); $('videoDlg').showModal(); };
     $('vidDur').oninput = vidNota;
-    $('vidZoom').oninput = vidNota;
+    $('vidZoom').oninput = () => { contarSitios(); vidNota(); };
+    $('vidSize').onchange = () => { contarSitios(); vidNota(); };
+    $('vidRec').onclick = () => {
+      $('vidDur').value = Math.min(90, Video.recomendado(sitios));
+      vidNota();
+    };
     $('videoDlg').addEventListener('close', () => {
       if ($('videoDlg').returnValue === 'ok') exportVideo();
     });

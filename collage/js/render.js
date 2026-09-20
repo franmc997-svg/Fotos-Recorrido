@@ -716,21 +716,36 @@
     reticula(f, W, H, ink, s, 0.5);
     Paper.develop(f, W, H, rev);
 
-    // Adornos de encima que no dependen de cuántas fotos haya puestas.
-    const frente = lienzo(W, H);
-    const fr = frente.getContext('2d');
-    reticula(fr, W, H, tintaEncima, s, 0.16);
-    textBlock(fr, W, H, model, s, tintaEncima);
-    frame(fr, W, H, tintaEncima, s);
+    /* Lo que va encima de las fotos, en dos lienzos.
 
-    // Lo que en la lámina va después del revelado y por tanto sin revelar.
-    const acabado = lienzo(W, H);
-    const ac = acabado.getContext('2d');
-    Paper.grime(ac, W, H, { grime: s.grime });
-    cartouche(ac, W, H, ink, s, model);
-    marks(ac, W, H, ink, s.marks);
+       `encima` es lo que acompaña a la cámara todo el rato. `remate` es el
+       mobiliario de la lámina impresa —el título, el marco, la suciedad del
+       escaneo, la escala— y ese se queda para el final: mirado de cerca, el
+       título sale partido a media palabra y el viñeteado se apelmaza contra
+       un lado, porque ninguna de las dos cosas está pensada para verse en un
+       trozo de la lámina. Apareciendo cuando el plano se abre, la lámina se
+       termina de imprimir delante de quien mira.
 
-    const grano = Paper.granoCapas(W, H, fondoAparte ? s.grain * 0.7 : s.grain, SEED);
+       Dentro de `remate` se respeta el orden de la lámina fija, que importa:
+       el marco tapa la suciedad en los márgenes si va después, y el bloque de
+       texto sube cuando hay marco.
+
+       El grano no está en ninguno de los dos: el vídeo lo aplica después de
+       recortar el encuadre, así conserva el mismo tamaño en pantalla esté la
+       cámara cerca o lejos. Es como se comporta el grano de una película de
+       verdad; amplíandose con el encuadre, de cerca parecen manchas. */
+    const encima = lienzo(W, H);
+    const en = encima.getContext('2d');
+    reticula(en, W, H, tintaEncima, s, 0.16);
+
+    const remate = lienzo(W, H);
+    const re = remate.getContext('2d');
+    textBlock(re, W, H, model, s, tintaEncima);
+    frame(re, W, H, tintaEncima, s);
+    Paper.grime(re, W, H, { grime: s.grime });
+    cartouche(re, W, H, ink, s, model);
+    marks(re, W, H, ink, s.marks);
+
     const hilo = hiloTramos(model, s, W);
 
     /* El orden de entrada es el del reloj de la cámara, no el del montaje: de
@@ -743,7 +758,9 @@
     const parches = piezas.map((p) => parcheDe(p, s, revEncima));
 
     return {
-      W, H, fondo, frente, acabado, grano, piezas,
+      W, H, fondo, encima, remate, piezas,
+      // El grano lo monta quien dibuje, a su resolución, no a la de la lámina.
+      granoNivel: fondoAparte ? s.grain * 0.7 : s.grain,
       filtro: (fondoAparte && s.photoColor !== 1)
         ? `saturate(${Math.max(0, s.photoColor)})` : null,
       mezcla: s.blend === 'multiply' ? 'multiply' : 'source-over',
